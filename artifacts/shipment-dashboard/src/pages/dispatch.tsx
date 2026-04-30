@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShipments, getContainerNumbers } from "@/hooks/use-shipments";
@@ -8,10 +8,10 @@ import { useDispatches } from "@/hooks/use-dispatches";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle2, FileSpreadsheet, Truck, Users } from "lucide-react";
+import { Combobox } from "@/components/ui/combobox";
+import { CheckCircle2, FileSpreadsheet, Search, Truck, Users } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -40,6 +40,7 @@ export default function Dispatch() {
   const { drivers } = useDrivers();
   const { trucks } = useTrucks();
   const { dispatches, addDispatch, markReturned } = useDispatches();
+  const [dispatchQuery, setDispatchQuery] = useState("");
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -61,15 +62,61 @@ export default function Dispatch() {
     },
   });
 
-  if (!isAuthenticated) return null;
-
   const isDriverBusy = (driverId: string) =>
     dispatches.some((d) => d.driverId === driverId && d.returnedAt == null);
 
-  const truckLabel = (id: string) => {
-    const t = trucks.find((tr) => tr.id === id);
-    return t ? `${t.model} — ${t.plateNumber}` : "Unknown truck";
-  };
+  // Flatten all container numbers from all shipments (handles new array shape + legacy single string)
+  const uniqueContainers = useMemo(
+    () => Array.from(new Set(shipments.flatMap((s) => getContainerNumbers(s)))).sort(),
+    [shipments],
+  );
+
+  const containerOptions = useMemo(
+    () => uniqueContainers.map((c) => ({ value: c, label: c })),
+    [uniqueContainers],
+  );
+
+  const driverOptions = useMemo(
+    () =>
+      drivers.map((d) => ({
+        value: d.id,
+        label: `${d.name}${isDriverBusy(d.id) ? " · Busy" : ""}`,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drivers, dispatches],
+  );
+
+  const truckOptions = useMemo(
+    () => trucks.map((t) => ({ value: t.id, label: `${t.model} — ${t.plateNumber}` })),
+    [trucks],
+  );
+
+  const filteredDispatches = useMemo(() => {
+    const q = dispatchQuery.trim().toLowerCase();
+    if (!q) return dispatches;
+    return dispatches.filter((d) => {
+      const driver = drivers.find((dr) => dr.id === d.driverId);
+      const truck = trucks.find((t) => t.id === d.truckId);
+      const truckText = truck
+        ? `${truck.model} ${truck.plateNumber}`
+        : d.truckInfo ?? "";
+      const haystack = [
+        d.containerNumber,
+        driver?.name ?? "",
+        driver?.phone ?? "",
+        truckText,
+        d.entryTime,
+        d.cargoDeliveryDate ?? "",
+        d.emptyReturnDate ?? "",
+        d.returnedAt ? "returned" : "active",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [dispatches, drivers, trucks, dispatchQuery]);
+
+  if (!isAuthenticated) return null;
 
   function onSubmit(data: DispatchFormValues) {
     addDispatch(data);
@@ -99,9 +146,7 @@ export default function Dispatch() {
   }
 
   const exportToExcel = () => {
-    if (dispatches.length === 0) return;
-
-    const rows = dispatches.map((d) => {
+    const rows = filteredDispatches.map((d) => {
       const driver = drivers.find((drv) => drv.id === d.driverId);
       const truck = trucks.find((t) => t.id === d.truckId);
       const truckDisplay = truck
@@ -121,6 +166,7 @@ export default function Dispatch() {
         "Added": format(new Date(d.addedAt), "yyyy-MM-dd HH:mm"),
       };
     });
+    if (rows.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -128,11 +174,6 @@ export default function Dispatch() {
     const filename = `dispatches-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
     XLSX.writeFile(wb, filename);
   };
-
-  // Flatten all container numbers from all shipments (handles new array shape + legacy single string)
-  const uniqueContainers = Array.from(
-    new Set(shipments.flatMap((s) => getContainerNumbers(s))),
-  ).sort();
 
   const formatDateCell = (value: string | undefined | null) =>
     value ? format(new Date(value), "MMM d, yyyy") : "—";
@@ -216,18 +257,21 @@ export default function Dispatch() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Container Number</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={uniqueContainers.length === 0}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={uniqueContainers.length === 0 ? "No shipments exist" : "Select container"} />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {uniqueContainers.map((c) => (
-                              <SelectItem key={c} value={c}>{c}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <Combobox
+                            options={containerOptions}
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={
+                              containerOptions.length === 0
+                                ? "No shipments exist"
+                                : "Search & select container"
+                            }
+                            searchPlaceholder="Type to search containers..."
+                            emptyText="No matching container."
+                            disabled={containerOptions.length === 0}
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -239,21 +283,19 @@ export default function Dispatch() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Driver</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={drivers.length === 0}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={drivers.length === 0 ? "No drivers exist" : "Select driver"} />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {drivers.map((d) => (
-                              <SelectItem key={d.id} value={d.id}>
-                                {d.name}
-                                {isDriverBusy(d.id) ? " · Busy" : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <Combobox
+                            options={driverOptions}
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={
+                              driverOptions.length === 0 ? "No drivers exist" : "Search & select driver"
+                            }
+                            searchPlaceholder="Type to search drivers..."
+                            emptyText="No matching driver."
+                            disabled={driverOptions.length === 0}
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -267,20 +309,21 @@ export default function Dispatch() {
                         <FormLabel>Truck</FormLabel>
                         <div className="flex items-center gap-2">
                           <div className="flex-1 min-w-0">
-                            <Select onValueChange={field.onChange} value={field.value} disabled={trucks.length === 0}>
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder={trucks.length === 0 ? "No trucks — add one" : "Select truck"} />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {trucks.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>
-                                    {t.model} — {t.plateNumber}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <FormControl>
+                              <Combobox
+                                options={truckOptions}
+                                value={field.value}
+                                onChange={field.onChange}
+                                placeholder={
+                                  truckOptions.length === 0
+                                    ? "No trucks — add one"
+                                    : "Search & select truck"
+                                }
+                                searchPlaceholder="Type to search trucks..."
+                                emptyText="No matching truck."
+                                disabled={truckOptions.length === 0}
+                              />
+                            </FormControl>
                           </div>
                           <AddTruckButton
                             iconOnly
@@ -352,20 +395,39 @@ export default function Dispatch() {
 
         {/* Data Table */}
         <Card className="shadow-sm border-border/60 overflow-hidden">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-6 border-b border-border/40 bg-muted/20">
-            <div>
-              <CardTitle className="text-lg font-semibold">Dispatch Records</CardTitle>
-              <CardDescription className="mt-1">Recent dispatch assignments</CardDescription>
+          <div className="flex flex-col gap-4 p-6 border-b border-border/40 bg-muted/20">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg font-semibold">Dispatch Records</CardTitle>
+                <CardDescription className="mt-1">
+                  Recent dispatch assignments
+                  {dispatchQuery && (
+                    <span className="ml-1 text-foreground">
+                      · showing {filteredDispatches.length} of {dispatches.length}
+                    </span>
+                  )}
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                onClick={exportToExcel}
+                disabled={filteredDispatches.length === 0}
+                className="gap-2 bg-background"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Export to Excel
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              onClick={exportToExcel}
-              disabled={dispatches.length === 0}
-              className="gap-2 bg-background"
-            >
-              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-              Export to Excel
-            </Button>
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                type="search"
+                value={dispatchQuery}
+                onChange={(e) => setDispatchQuery(e.target.value)}
+                placeholder="Search by container, driver, truck, status..."
+                className="pl-9 bg-background"
+              />
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -377,6 +439,16 @@ export default function Dispatch() {
                 <h3 className="text-lg font-medium text-foreground">No dispatches logged</h3>
                 <p className="text-muted-foreground mt-2 max-w-sm">
                   Dispatches you log will appear here. Start by assigning a container to a driver.
+                </p>
+              </div>
+            ) : filteredDispatches.length === 0 ? (
+              <div className="py-16 flex flex-col items-center justify-center text-center px-4">
+                <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-3">
+                  <Search className="h-6 w-6 text-muted-foreground/50" />
+                </div>
+                <h3 className="text-base font-medium text-foreground">No matching dispatches</h3>
+                <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                  No records match "{dispatchQuery}". Try a different search term.
                 </p>
               </div>
             ) : (
@@ -396,13 +468,13 @@ export default function Dispatch() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dispatches.map((dispatch) => {
+                  {filteredDispatches.map((dispatch) => {
                     const driver = drivers.find((d) => d.id === dispatch.driverId);
                     const driverName = driver?.name || "Unknown";
                     const truck = trucks.find((t) => t.id === dispatch.truckId);
                     const truckDisplay = truck
                       ? `${truck.model} — ${truck.plateNumber}`
-                      : dispatch.truckInfo || (dispatch.truckId ? truckLabel(dispatch.truckId) : "—");
+                      : dispatch.truckInfo || "—";
                     const isReturned = dispatch.returnedAt != null;
                     return (
                       <TableRow key={dispatch.id} className="group">
