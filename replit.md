@@ -24,4 +24,12 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
+## Artifacts
+
+- `shipment-dashboard` — React + Vite logistics shipment tracking dashboard.
+  - Frontend-only app (no backend). Auth and data persist via `localStorage`.
+  - Hardcoded credentials: `admin@example.com` / `password123` (placeholder, intended to be swapped later).
+  - Pages: `/` login, `/dashboard` protected entry form + table.
+  - Uses `xlsx` (SheetJS) for Excel export.
+
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
