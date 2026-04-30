@@ -1,0 +1,34 @@
+Build a full-stack logistics dashboard. Please use Next.js (App Router), React, Tailwind CSS, and set up a basic SQLite database (or robust state management) to handle relational data for Clients, Drivers, Shipments, and Dispatches.
+
+The application must include a Navigation Sidebar or Header to switch between pages, and consist of 3 main routes:
+
+1. Login Page (/):
+- Centered login card with "Email", "Password", and "Login" button.
+- Hardcode authentication: Email "admin@example.com", Password "password123".
+- Route to /dashboard on success.
+
+2. Dashboard Homepage (/dashboard - Shipments):
+- Header: Display the current Hijri (Islamic) Date dynamically, alongside a "Logout" button.
+- Client Management: Add an "Add Client" button. When clicked, open a modal (popup) with a form to enter a new client's name and save it to the database.
+- Main Data Entry Form:
+  - Bayan no (Text input)
+  - Client's Name (Select dropdown - populated dynamically from the clients added via the modal)
+  - Shipment type (Select dropdown: "LCL", "FCL", "AIR")
+  - Containers no. (Select dropdown: 1 to 20)
+  - Container number (Text input)
+  - Last pullout date (Date picker)
+  - Terminal (Select dropdown: "RSGT", "DP", "MAW", "SAL", "SATS")
+- Data Table 1: At the bottom, a responsive table showing all submitted shipment data.
+- Export: An "Export to Excel" button above the table using the `xlsx` library to download this table's data.
+
+3. Dispatch & Drivers Page (/dispatch):
+- Driver Management: Add an "Add Driver" button. When clicked, open a modal (popup) to enter "Driver Name" and "Phone Number". Save to the database with a default status of "Available".
+- Dispatch Entry Form:
+  - Container Number (Select dropdown - populated dynamically from the 'Container number' records previously submitted in the Dashboard Homepage).
+  - Driver Name (Select dropdown - populated dynamically from the added drivers).
+  - Truck Information (Text input).
+  - Driver Entry Time (Datetime-local input).
+- Data Table 2: At the bottom, a responsive table showing all dispatch records (Container, Driver, Truck, Entry Time). Add a column for "Driver Status" indicating if they are currently "Available" or "Busy/Not Available".
+- Export: An "Export to Excel" button above this table using the `xlsx` library to download the dispatch data.
+
+Make sure the UI is professional, modern, and fully functional. Modals should close automatically upon submission.

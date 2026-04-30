@@ -26,10 +26,13 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 ## Artifacts
 
-- `shipment-dashboard` — React + Vite logistics shipment tracking dashboard.
+- `shipment-dashboard` — React + Vite logistics operations dashboard.
   - Frontend-only app (no backend). Auth and data persist via `localStorage`.
   - Hardcoded credentials: `admin@example.com` / `password123` (placeholder, intended to be swapped later).
-  - Pages: `/` login, `/dashboard` protected entry form + table.
-  - Uses `xlsx` (SheetJS) for Excel export.
+  - Pages: `/` login, `/dashboard` (Shipments + Clients), `/dispatch` (Drivers + Dispatch records).
+  - Shared `<AppHeader />` with navigation + dynamic Hijri (Umm al-Qura) date display.
+  - Data hooks: `use-shipments`, `use-clients`, `use-drivers`, `use-dispatches` — all backed by `localStorage`.
+  - Driver status is derived: any driver appearing in a dispatch record is `Busy`, else `Available`.
+  - Uses `xlsx` (SheetJS) for Excel export on both Shipments and Dispatch tables.
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.

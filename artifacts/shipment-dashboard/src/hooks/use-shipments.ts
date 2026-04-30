@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 export type ShipmentType = "LCL" | "FCL" | "AIR";
-export type Terminal = "RSGT" | "DP" | "MAW";
+export type Terminal = "RSGT" | "DP" | "MAW" | "SAL" | "SATS";
 
 export interface Shipment {
   id: string;

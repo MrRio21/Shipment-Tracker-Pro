@@ -2,19 +2,22 @@ import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useShipments } from "@/hooks/use-shipments";
+import { useClients } from "@/hooks/use-clients";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Anchor, LogOut, Download, FileSpreadsheet, Ship } from "lucide-react";
+import { Download, FileSpreadsheet, Ship } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import { AppHeader } from "@/components/app-header";
+import { AddClientButton } from "@/components/add-client-modal";
 
 const shipmentSchema = z.object({
   bayanNo: z.string().min(1, { message: "Bayan No is required" }),
@@ -23,15 +26,16 @@ const shipmentSchema = z.object({
   containersCount: z.coerce.number().min(1).max(20),
   containerNumber: z.string().min(1, { message: "Container Number is required" }),
   lastPulloutDate: z.string().min(1, { message: "Date is required" }),
-  terminal: z.enum(["RSGT", "DP", "MAW"], { required_error: "Terminal is required" }),
+  terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
 });
 
 type ShipmentFormValues = z.infer<typeof shipmentSchema>;
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { shipments, addShipment } = useShipments();
+  const { clients } = useClients();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -91,30 +95,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-muted/30 pb-12">
-      {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-              <Anchor className="text-primary-foreground h-4 w-4" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-foreground leading-tight tracking-tight">PortLogistics</h1>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Operations Console</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="text-sm font-medium text-muted-foreground hidden sm:block">
-              admin@example.com
-            </div>
-            <Button variant="outline" size="sm" onClick={logout} className="gap-2">
-              <LogOut className="h-4 w-4" />
-              Sign Out
-            </Button>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
         
@@ -150,10 +131,22 @@ export default function Dashboard() {
                     name="clientName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Client's Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Company LLC" {...field} />
-                        </FormControl>
+                        <div className="flex items-center justify-between">
+                          <FormLabel>Client's Name</FormLabel>
+                          <AddClientButton onSuccess={(name) => field.onChange(name)} />
+                        </div>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={clients.length === 0}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder={clients.length === 0 ? "No clients yet — add one" : "Select client"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {clients.map(c => (
+                              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -235,6 +228,8 @@ export default function Dashboard() {
                             <SelectItem value="RSGT">RSGT (Red Sea Gateway)</SelectItem>
                             <SelectItem value="DP">DP World</SelectItem>
                             <SelectItem value="MAW">MAW (Mawani)</SelectItem>
+                            <SelectItem value="SAL">SAL (Saudi Arabian Logistics)</SelectItem>
+                            <SelectItem value="SATS">SATS (Saudi Arabia Terminal Services)</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
