@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useShipments } from "@/hooks/use-shipments";
+import { useShipments, getContainerNumbers, getHijriDate } from "@/hooks/use-shipments";
 import { useClients } from "@/hooks/use-clients";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileSpreadsheet, Ship, Trash2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, ChevronsUpDown, FileSpreadsheet, Ship, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,32 +20,41 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { AppHeader } from "@/components/app-header";
 import { AddClientButton } from "@/components/add-client-modal";
+import { cn } from "@/lib/utils";
+import DatePicker, { DateObject } from "react-multi-date-picker";
+import arabic from "react-date-object/calendars/arabic";
+import arabic_en from "react-date-object/locales/arabic_en";
 
-const shipmentSchema = z.object({
-  bayanNo: z.string().min(1, { message: "Bayan No is required" }),
-  clientName: z.string().min(1, { message: "Client Name is required" }),
-  shipmentType: z.enum(["LCL", "FCL", "AIR"], { required_error: "Type is required" }),
-  containersCount: z.coerce.number().min(1).max(20),
-  containerNumber: z.string().min(1, { message: "Container Number is required" }),
-  lastPulloutDate: z.string().min(1, { message: "Date is required" }),
-  hijriDate: z.string().min(1, { message: "Hijri date is required" }),
-  terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
-});
-
-type ShipmentFormValues = z.infer<typeof shipmentSchema>;
+const HIJRI_FORMAT = "DD MMMM YYYY";
 
 const todayHijri = () =>
-  new Intl.DateTimeFormat("en-TN-u-ca-islamic-umalqura", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date());
+  new DateObject({ calendar: arabic, locale: arabic_en }).format(HIJRI_FORMAT);
+
+const shipmentSchema = z
+  .object({
+    bayanNo: z.string().min(1, { message: "Bayan No is required" }),
+    clientName: z.string().min(1, { message: "Client Name is required" }),
+    shipmentType: z.enum(["LCL", "FCL", "AIR"], { required_error: "Type is required" }),
+    containersCount: z.coerce.number().int().min(1).max(20),
+    containerNumbers: z
+      .array(z.string().min(1, { message: "Container number is required" }))
+      .min(1),
+    lastPulloutDateHijri: z.string().min(1, { message: "Hijri pullout date is required" }),
+    terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
+  })
+  .refine((data) => data.containerNumbers.length === data.containersCount, {
+    message: "Number of container entries must match the selected containers count",
+    path: ["containerNumbers"],
+  });
+
+type ShipmentFormValues = z.infer<typeof shipmentSchema>;
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
   const { shipments, addShipment } = useShipments();
   const { clients, removeClient } = useClients();
+  const [clientPopoverOpen, setClientPopoverOpen] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -58,22 +69,39 @@ export default function Dashboard() {
       clientName: "",
       shipmentType: "FCL",
       containersCount: 1,
-      containerNumber: "",
-      lastPulloutDate: format(new Date(), "yyyy-MM-dd"),
-      hijriDate: todayHijri(),
+      containerNumbers: [""],
+      lastPulloutDateHijri: todayHijri(),
       terminal: "RSGT",
     },
   });
 
+  const containersCount = Number(form.watch("containersCount")) || 1;
+
+  // Resize the container number array whenever the count changes.
+  useEffect(() => {
+    const current = form.getValues("containerNumbers") || [];
+    if (current.length === containersCount) return;
+    const next = Array.from({ length: containersCount }, (_, i) => current[i] ?? "");
+    form.setValue("containerNumbers", next, { shouldValidate: false });
+  }, [containersCount, form]);
+
   if (!isAuthenticated) return null;
 
   function onSubmit(data: ShipmentFormValues) {
-    addShipment(data);
+    addShipment({
+      bayanNo: data.bayanNo,
+      clientName: data.clientName,
+      shipmentType: data.shipmentType,
+      containersCount: data.containersCount,
+      containerNumbers: data.containerNumbers,
+      lastPulloutDateHijri: data.lastPulloutDateHijri,
+      terminal: data.terminal,
+    });
     form.reset({
       ...form.getValues(),
       bayanNo: "",
-      containerNumber: "",
-      hijriDate: todayHijri(),
+      containerNumbers: Array.from({ length: data.containersCount }, () => ""),
+      lastPulloutDateHijri: todayHijri(),
     });
     toast.success("Shipment added successfully", {
       description: `Bayan No ${data.bayanNo} for ${data.clientName}`,
@@ -100,9 +128,8 @@ export default function Dashboard() {
       "Client's Name": s.clientName,
       "Type": s.shipmentType,
       "Containers": s.containersCount,
-      "Container Number": s.containerNumber,
-      "Last Pullout Date": s.lastPulloutDate,
-      "Hijri Date": s.hijriDate ?? "",
+      "Container Numbers": getContainerNumbers(s).join(", "),
+      "Last Pullout Date (Hijri)": getHijriDate(s),
       "Terminal": s.terminal,
       "Added": format(new Date(s.addedAt), "yyyy-MM-dd HH:mm"),
     }));
@@ -113,6 +140,8 @@ export default function Dashboard() {
     const filename = `shipments-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
     XLSX.writeFile(wb, filename);
   };
+
+  const selectedClientLabel = form.watch("clientName");
 
   return (
     <div className="min-h-screen bg-muted/30 pb-12">
@@ -162,40 +191,77 @@ export default function Dashboard() {
                         <FormLabel>Client's Name</FormLabel>
                         <div className="flex items-center gap-2">
                           <div className="flex-1 min-w-0">
-                            <Select
-                              onValueChange={field.onChange}
-                              value={field.value}
-                              disabled={clients.length === 0}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue
-                                    placeholder={
-                                      clients.length === 0
-                                        ? "No clients yet — add one"
-                                        : "Select client"
-                                    }
-                                  />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {clients.map((c) => (
-                                  <SelectItem key={c.id} value={c.name}>
-                                    {c.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <Popover open={clientPopoverOpen} onOpenChange={setClientPopoverOpen}>
+                              <PopoverTrigger asChild>
+                                <FormControl>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={clientPopoverOpen}
+                                    disabled={clients.length === 0}
+                                    className={cn(
+                                      "w-full justify-between font-normal",
+                                      !field.value && "text-muted-foreground",
+                                    )}
+                                  >
+                                    <span className="truncate">
+                                      {field.value ||
+                                        (clients.length === 0
+                                          ? "No clients yet — add one"
+                                          : "Search & select client")}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </FormControl>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                className="p-0"
+                                style={{ width: "var(--radix-popover-trigger-width)" }}
+                                align="start"
+                              >
+                                <Command>
+                                  <CommandInput placeholder="Type to search clients..." />
+                                  <CommandList>
+                                    <CommandEmpty>No matching client.</CommandEmpty>
+                                    <CommandGroup>
+                                      {clients.map((c) => (
+                                        <CommandItem
+                                          key={c.id}
+                                          value={c.name}
+                                          onSelect={(value) => {
+                                            field.onChange(value);
+                                            setClientPopoverOpen(false);
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              field.value === c.name ? "opacity-100" : "opacity-0",
+                                            )}
+                                          />
+                                          {c.name}
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
                           </div>
                           <Button
                             type="button"
                             variant="outline"
                             size="icon"
                             className="h-9 w-9 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/40 disabled:opacity-40"
-                            disabled={!field.value}
-                            onClick={() => handleDeleteClient(field.value)}
+                            disabled={!selectedClientLabel}
+                            onClick={() => handleDeleteClient(selectedClientLabel)}
                             aria-label="Delete selected client"
-                            title={field.value ? `Remove client ${field.value}` : "Select a client to remove"}
+                            title={
+                              selectedClientLabel
+                                ? `Remove client ${selectedClientLabel}`
+                                : "Select a client to remove"
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -234,7 +300,10 @@ export default function Dashboard() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Containers (1-20)</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={String(field.value)}>
+                        <Select
+                          onValueChange={(v) => field.onChange(Number(v))}
+                          value={String(field.value)}
+                        >
                           <FormControl>
                             <SelectTrigger>
                               <SelectValue placeholder="Select count" />
@@ -248,20 +317,6 @@ export default function Dashboard() {
                             ))}
                           </SelectContent>
                         </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="containerNumber"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Container Number</FormLabel>
-                        <FormControl>
-                          <Input placeholder="MSKU1234567" className="uppercase" {...field} />
-                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -294,31 +349,69 @@ export default function Dashboard() {
 
                   <FormField
                     control={form.control}
-                    name="lastPulloutDate"
+                    name="lastPulloutDateHijri"
                     render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Last Pullout Date</FormLabel>
+                      <FormItem className="flex flex-col">
+                        <FormLabel>Last Pullout Date (Hijri)</FormLabel>
                         <FormControl>
-                          <Input type="date" {...field} />
+                          <DatePicker
+                            calendar={arabic}
+                            locale={arabic_en}
+                            format={HIJRI_FORMAT}
+                            value={field.value || ""}
+                            onChange={(date) => {
+                              if (date instanceof DateObject) {
+                                field.onChange(date.format(HIJRI_FORMAT));
+                              } else {
+                                field.onChange("");
+                              }
+                            }}
+                            placeholder="Select Hijri date"
+                            inputClass="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            containerClassName="w-full"
+                            portal
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                </div>
 
-                  <FormField
-                    control={form.control}
-                    name="hijriDate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Hijri Date</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. 16 Dhu al-Qi'dah 1447" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                {/* Dynamic container number inputs */}
+                <div className="space-y-3 pt-2 border-t border-border/40">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">Container Numbers</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Enter {containersCount} container {containersCount === 1 ? "number" : "numbers"} for this shipment
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {Array.from({ length: containersCount }, (_, i) => (
+                      <FormField
+                        key={i}
+                        control={form.control}
+                        name={`containerNumbers.${i}` as const}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs text-muted-foreground">
+                              Container {i + 1}
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder={`MSKU000000${(i + 1) % 10}`}
+                                className="uppercase font-mono text-sm"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-border/40">
@@ -368,39 +461,44 @@ export default function Dashboard() {
                     <TableHead className="font-semibold">Client</TableHead>
                     <TableHead className="font-semibold">Type</TableHead>
                     <TableHead className="font-semibold">Containers</TableHead>
-                    <TableHead className="font-semibold">Container #</TableHead>
+                    <TableHead className="font-semibold">Container Numbers</TableHead>
                     <TableHead className="font-semibold">Terminal</TableHead>
-                    <TableHead className="font-semibold">Pullout Date</TableHead>
-                    <TableHead className="font-semibold">Hijri Date</TableHead>
+                    <TableHead className="font-semibold">Pullout (Hijri)</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {shipments.map((shipment) => (
-                    <TableRow key={shipment.id} className="group">
-                      <TableCell className="font-medium text-foreground">{shipment.bayanNo}</TableCell>
-                      <TableCell>{shipment.clientName}</TableCell>
-                      <TableCell>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
-                          {shipment.shipmentType}
-                        </span>
-                      </TableCell>
-                      <TableCell>{shipment.containersCount}</TableCell>
-                      <TableCell className="uppercase font-mono text-xs">{shipment.containerNumber}</TableCell>
-                      <TableCell>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-secondary/10 text-secondary-foreground border border-secondary/20">
-                          {shipment.terminal}
-                        </span>
-                      </TableCell>
-                      <TableCell>{format(new Date(shipment.lastPulloutDate), "MMM d, yyyy")}</TableCell>
-                      <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
-                        {shipment.hijriDate || "—"}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
-                        {formatDistanceToNow(new Date(shipment.addedAt), { addSuffix: true })}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {shipments.map((shipment) => {
+                    const containerNums = getContainerNumbers(shipment);
+                    const containersText = containerNums.length > 0 ? containerNums.join(", ") : "—";
+                    const hijri = getHijriDate(shipment);
+                    return (
+                      <TableRow key={shipment.id} className="group">
+                        <TableCell className="font-medium text-foreground">{shipment.bayanNo}</TableCell>
+                        <TableCell>{shipment.clientName}</TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
+                            {shipment.shipmentType}
+                          </span>
+                        </TableCell>
+                        <TableCell>{shipment.containersCount}</TableCell>
+                        <TableCell className="uppercase font-mono text-xs max-w-[260px]">
+                          <span className="block truncate" title={containersText}>
+                            {containersText}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-secondary/10 text-secondary-foreground border border-secondary/20">
+                            {shipment.terminal}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">{hijri || "—"}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
+                          {formatDistanceToNow(new Date(shipment.addedAt), { addSuffix: true })}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

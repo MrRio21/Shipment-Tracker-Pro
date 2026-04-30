@@ -4,29 +4,26 @@ export interface Dispatch {
   id: string;
   containerNumber: string;
   driverId: string;
-  truckInfo: string;
+  truckId: string;
   entryTime: string;
   cargoDeliveryDate: string;
   emptyReturnDate: string;
   addedAt: string;
   returnedAt: string | null;
+  // Legacy field kept for backward compatibility with previously stored records
+  truckInfo?: string;
 }
 
 const STORAGE_KEY = "shipment-dispatches";
 const EMPTY: Dispatch[] = [];
 
 export function useDispatches() {
-  const [dispatches, setDispatches] = useLocalStorageState<Dispatch[]>(
-    STORAGE_KEY,
-    EMPTY,
-  );
+  const [dispatches, setDispatches] = useLocalStorageState<Dispatch[]>(STORAGE_KEY, EMPTY);
 
-  const addDispatch = (
-    dispatch: Omit<Dispatch, "id" | "addedAt" | "returnedAt">,
-  ) => {
+  const addDispatch = (data: Omit<Dispatch, "id" | "addedAt" | "returnedAt">) => {
     setDispatches((prev) => [
       {
-        ...dispatch,
+        ...data,
         id: crypto.randomUUID(),
         addedAt: new Date().toISOString(),
         returnedAt: null,

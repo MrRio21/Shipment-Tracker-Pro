@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useShipments } from "@/hooks/use-shipments";
+import { useShipments, getContainerNumbers } from "@/hooks/use-shipments";
 import { useDrivers } from "@/hooks/use-drivers";
+import { useTrucks } from "@/hooks/use-trucks";
 import { useDispatches } from "@/hooks/use-dispatches";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,11 +20,12 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { AppHeader } from "@/components/app-header";
 import { AddDriverButton } from "@/components/add-driver-modal";
+import { AddTruckButton } from "@/components/add-truck-modal";
 
 const dispatchSchema = z.object({
   containerNumber: z.string().min(1, { message: "Container Number is required" }),
   driverId: z.string().min(1, { message: "Driver is required" }),
-  truckInfo: z.string().min(1, { message: "Truck Information is required" }),
+  truckId: z.string().min(1, { message: "Truck is required" }),
   entryTime: z.string().min(1, { message: "Entry time is required" }),
   cargoDeliveryDate: z.string().min(1, { message: "Cargo delivery date is required" }),
   emptyReturnDate: z.string().min(1, { message: "Empty return date is required" }),
@@ -36,6 +38,7 @@ export default function Dispatch() {
   const { isAuthenticated } = useAuth();
   const { shipments } = useShipments();
   const { drivers } = useDrivers();
+  const { trucks } = useTrucks();
   const { dispatches, addDispatch, markReturned } = useDispatches();
 
   useEffect(() => {
@@ -51,7 +54,7 @@ export default function Dispatch() {
     defaultValues: {
       containerNumber: "",
       driverId: "",
-      truckInfo: "",
+      truckId: "",
       entryTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
       cargoDeliveryDate: today,
       emptyReturnDate: today,
@@ -63,13 +66,18 @@ export default function Dispatch() {
   const isDriverBusy = (driverId: string) =>
     dispatches.some((d) => d.driverId === driverId && d.returnedAt == null);
 
+  const truckLabel = (id: string) => {
+    const t = trucks.find((tr) => tr.id === id);
+    return t ? `${t.model} — ${t.plateNumber}` : "Unknown truck";
+  };
+
   function onSubmit(data: DispatchFormValues) {
     addDispatch(data);
     const now = new Date();
     form.reset({
       containerNumber: "",
       driverId: "",
-      truckInfo: "",
+      truckId: "",
       entryTime: format(now, "yyyy-MM-dd'T'HH:mm"),
       cargoDeliveryDate: format(now, "yyyy-MM-dd"),
       emptyReturnDate: format(now, "yyyy-MM-dd"),
@@ -95,11 +103,15 @@ export default function Dispatch() {
 
     const rows = dispatches.map((d) => {
       const driver = drivers.find((drv) => drv.id === d.driverId);
+      const truck = trucks.find((t) => t.id === d.truckId);
+      const truckDisplay = truck
+        ? `${truck.model} — ${truck.plateNumber}`
+        : d.truckInfo || "Unknown";
       return {
         "Container Number": d.containerNumber,
         "Driver Name": driver?.name || "Unknown",
         "Phone": driver?.phone || "N/A",
-        "Truck": d.truckInfo,
+        "Truck": truckDisplay,
         "Entry Time": format(new Date(d.entryTime), "yyyy-MM-dd HH:mm"),
         "Cargo Delivery Date": d.cargoDeliveryDate ?? "",
         "Empty Return Date": d.emptyReturnDate ?? "",
@@ -117,8 +129,10 @@ export default function Dispatch() {
     XLSX.writeFile(wb, filename);
   };
 
-  // Deduplicate container numbers for the select
-  const uniqueContainers = Array.from(new Set(shipments.map((s) => s.containerNumber))).sort();
+  // Flatten all container numbers from all shipments (handles new array shape + legacy single string)
+  const uniqueContainers = Array.from(
+    new Set(shipments.flatMap((s) => getContainerNumbers(s))),
+  ).sort();
 
   const formatDateCell = (value: string | undefined | null) =>
     value ? format(new Date(value), "MMM d, yyyy") : "—";
@@ -247,13 +261,32 @@ export default function Dispatch() {
 
                   <FormField
                     control={form.control}
-                    name="truckInfo"
+                    name="truckId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Truck Information</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. Volvo FH16 — Plate 1234" {...field} />
-                        </FormControl>
+                        <FormLabel>Truck</FormLabel>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <Select onValueChange={field.onChange} value={field.value} disabled={trucks.length === 0}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder={trucks.length === 0 ? "No trucks — add one" : "Select truck"} />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {trucks.map((t) => (
+                                  <SelectItem key={t.id} value={t.id}>
+                                    {t.model} — {t.plateNumber}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <AddTruckButton
+                            iconOnly
+                            onSuccess={(id) => form.setValue("truckId", id, { shouldValidate: true })}
+                          />
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -304,7 +337,11 @@ export default function Dispatch() {
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-border/40">
-                  <Button type="submit" className="min-w-[150px]" disabled={uniqueContainers.length === 0 || drivers.length === 0}>
+                  <Button
+                    type="submit"
+                    className="min-w-[150px]"
+                    disabled={uniqueContainers.length === 0 || drivers.length === 0 || trucks.length === 0}
+                  >
                     Log Dispatch
                   </Button>
                 </div>
@@ -362,13 +399,17 @@ export default function Dispatch() {
                   {dispatches.map((dispatch) => {
                     const driver = drivers.find((d) => d.id === dispatch.driverId);
                     const driverName = driver?.name || "Unknown";
+                    const truck = trucks.find((t) => t.id === dispatch.truckId);
+                    const truckDisplay = truck
+                      ? `${truck.model} — ${truck.plateNumber}`
+                      : dispatch.truckInfo || (dispatch.truckId ? truckLabel(dispatch.truckId) : "—");
                     const isReturned = dispatch.returnedAt != null;
                     return (
                       <TableRow key={dispatch.id} className="group">
                         <TableCell className="uppercase font-mono text-xs">{dispatch.containerNumber}</TableCell>
                         <TableCell className="font-medium text-foreground">{driverName}</TableCell>
                         <TableCell>{driver?.phone || "N/A"}</TableCell>
-                        <TableCell>{dispatch.truckInfo}</TableCell>
+                        <TableCell>{truckDisplay}</TableCell>
                         <TableCell>{format(new Date(dispatch.entryTime), "MMM d, yyyy HH:mm")}</TableCell>
                         <TableCell>{formatDateCell(dispatch.cargoDeliveryDate)}</TableCell>
                         <TableCell>{formatDateCell(dispatch.emptyReturnDate)}</TableCell>

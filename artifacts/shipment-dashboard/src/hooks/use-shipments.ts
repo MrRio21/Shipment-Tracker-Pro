@@ -9,32 +9,40 @@ export interface Shipment {
   clientName: string;
   shipmentType: ShipmentType;
   containersCount: number;
-  containerNumber: string;
-  lastPulloutDate: string;
-  hijriDate: string;
+  containerNumbers: string[];
+  lastPulloutDateHijri: string;
   terminal: Terminal;
   addedAt: string;
+  // Legacy fields kept for backward compatibility with previously stored records
+  containerNumber?: string;
+  lastPulloutDate?: string;
+  hijriDate?: string;
 }
 
 const STORAGE_KEY = "shipment-entries";
 const EMPTY: Shipment[] = [];
 
 export function useShipments() {
-  const [shipments, setShipments] = useLocalStorageState<Shipment[]>(
-    STORAGE_KEY,
-    EMPTY,
-  );
+  const [shipments, setShipments] = useLocalStorageState<Shipment[]>(STORAGE_KEY, EMPTY);
 
-  const addShipment = (shipment: Omit<Shipment, "id" | "addedAt">) => {
+  const addShipment = (data: Omit<Shipment, "id" | "addedAt">) => {
     setShipments((prev) => [
-      {
-        ...shipment,
-        id: crypto.randomUUID(),
-        addedAt: new Date().toISOString(),
-      },
+      { ...data, id: crypto.randomUUID(), addedAt: new Date().toISOString() },
       ...prev,
     ]);
   };
 
   return { shipments, addShipment };
+}
+
+export function getContainerNumbers(s: Shipment): string[] {
+  if (Array.isArray(s.containerNumbers) && s.containerNumbers.length > 0) {
+    return s.containerNumbers.filter(Boolean);
+  }
+  if (s.containerNumber) return [s.containerNumber];
+  return [];
+}
+
+export function getHijriDate(s: Shipment): string {
+  return s.lastPulloutDateHijri || s.hijriDate || "";
 }
