@@ -25,6 +25,8 @@ const dispatchSchema = z.object({
   driverId: z.string().min(1, { message: "Driver is required" }),
   truckInfo: z.string().min(1, { message: "Truck Information is required" }),
   entryTime: z.string().min(1, { message: "Entry time is required" }),
+  cargoDeliveryDate: z.string().min(1, { message: "Cargo delivery date is required" }),
+  emptyReturnDate: z.string().min(1, { message: "Empty return date is required" }),
 });
 
 type DispatchFormValues = z.infer<typeof dispatchSchema>;
@@ -42,6 +44,8 @@ export default function Dispatch() {
     }
   }, [isAuthenticated, setLocation]);
 
+  const today = format(new Date(), "yyyy-MM-dd");
+
   const form = useForm<DispatchFormValues>({
     resolver: zodResolver(dispatchSchema),
     defaultValues: {
@@ -49,6 +53,8 @@ export default function Dispatch() {
       driverId: "",
       truckInfo: "",
       entryTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      cargoDeliveryDate: today,
+      emptyReturnDate: today,
     },
   });
 
@@ -59,11 +65,14 @@ export default function Dispatch() {
 
   function onSubmit(data: DispatchFormValues) {
     addDispatch(data);
+    const now = new Date();
     form.reset({
       containerNumber: "",
       driverId: "",
       truckInfo: "",
-      entryTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      entryTime: format(now, "yyyy-MM-dd'T'HH:mm"),
+      cargoDeliveryDate: format(now, "yyyy-MM-dd"),
+      emptyReturnDate: format(now, "yyyy-MM-dd"),
     });
 
     const driverName = drivers.find((d) => d.id === data.driverId)?.name || "Unknown Driver";
@@ -92,6 +101,8 @@ export default function Dispatch() {
         "Phone": driver?.phone || "N/A",
         "Truck": d.truckInfo,
         "Entry Time": format(new Date(d.entryTime), "yyyy-MM-dd HH:mm"),
+        "Cargo Delivery Date": d.cargoDeliveryDate ?? "",
+        "Empty Return Date": d.emptyReturnDate ?? "",
         "Dispatch Status": d.returnedAt ? "Returned" : "Active",
         "Returned At": d.returnedAt ? format(new Date(d.returnedAt), "yyyy-MM-dd HH:mm") : "",
         "Driver Status": driver && isDriverBusy(driver.id) ? "Busy" : "Available",
@@ -108,6 +119,9 @@ export default function Dispatch() {
 
   // Deduplicate container numbers for the select
   const uniqueContainers = Array.from(new Set(shipments.map((s) => s.containerNumber))).sort();
+
+  const formatDateCell = (value: string | undefined | null) =>
+    value ? format(new Date(value), "MMM d, yyyy") : "—";
 
   return (
     <div className="min-h-screen bg-muted/30 pb-12">
@@ -180,7 +194,7 @@ export default function Dispatch() {
           <CardContent className="pt-6">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
                   <FormField
                     control={form.control}
@@ -259,6 +273,34 @@ export default function Dispatch() {
                     )}
                   />
 
+                  <FormField
+                    control={form.control}
+                    name="cargoDeliveryDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Cargo Delivery Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="emptyReturnDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Empty Return Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-border/40">
@@ -309,6 +351,8 @@ export default function Dispatch() {
                     <TableHead className="font-semibold">Phone</TableHead>
                     <TableHead className="font-semibold">Truck</TableHead>
                     <TableHead className="font-semibold">Entry Time</TableHead>
+                    <TableHead className="font-semibold">Cargo Delivery</TableHead>
+                    <TableHead className="font-semibold">Empty Return</TableHead>
                     <TableHead className="font-semibold">Status</TableHead>
                     <TableHead className="font-semibold">Action</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
@@ -326,6 +370,8 @@ export default function Dispatch() {
                         <TableCell>{driver?.phone || "N/A"}</TableCell>
                         <TableCell>{dispatch.truckInfo}</TableCell>
                         <TableCell>{format(new Date(dispatch.entryTime), "MMM d, yyyy HH:mm")}</TableCell>
+                        <TableCell>{formatDateCell(dispatch.cargoDeliveryDate)}</TableCell>
+                        <TableCell>{formatDateCell(dispatch.emptyReturnDate)}</TableCell>
                         <TableCell>
                           {isReturned ? (
                             <span className="inline-flex flex-col gap-0.5">

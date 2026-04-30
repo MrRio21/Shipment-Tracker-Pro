@@ -6,6 +6,8 @@ export interface Dispatch {
   driverId: string;
   truckInfo: string;
   entryTime: string;
+  cargoDeliveryDate: string;
+  emptyReturnDate: string;
   addedAt: string;
   returnedAt: string | null;
 }

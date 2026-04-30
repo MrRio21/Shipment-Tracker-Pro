@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarDays, FileSpreadsheet, Ship } from "lucide-react";
+import { FileSpreadsheet, Ship, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,16 +26,24 @@ const shipmentSchema = z.object({
   containersCount: z.coerce.number().min(1).max(20),
   containerNumber: z.string().min(1, { message: "Container Number is required" }),
   lastPulloutDate: z.string().min(1, { message: "Date is required" }),
+  hijriDate: z.string().min(1, { message: "Hijri date is required" }),
   terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
 });
 
 type ShipmentFormValues = z.infer<typeof shipmentSchema>;
 
+const todayHijri = () =>
+  new Intl.DateTimeFormat("en-TN-u-ca-islamic-umalqura", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
   const { shipments, addShipment } = useShipments();
-  const { clients } = useClients();
+  const { clients, removeClient } = useClients();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -52,15 +60,10 @@ export default function Dashboard() {
       containersCount: 1,
       containerNumber: "",
       lastPulloutDate: format(new Date(), "yyyy-MM-dd"),
+      hijriDate: todayHijri(),
       terminal: "RSGT",
     },
   });
-
-  const hijriDate = new Intl.DateTimeFormat("en-TN-u-ca-islamic-umalqura", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date());
 
   if (!isAuthenticated) return null;
 
@@ -70,7 +73,7 @@ export default function Dashboard() {
       ...form.getValues(),
       bayanNo: "",
       containerNumber: "",
-      // Keep other defaults for ease of sequential data entry
+      hijriDate: todayHijri(),
     });
     toast.success("Shipment added successfully", {
       description: `Bayan No ${data.bayanNo} for ${data.clientName}`,
@@ -78,23 +81,35 @@ export default function Dashboard() {
     });
   }
 
+  function handleDeleteClient(name: string) {
+    const client = clients.find((c) => c.name === name);
+    if (!client) return;
+    removeClient(client.id);
+    form.setValue("clientName", "", { shouldValidate: false });
+    toast.success("Client removed", {
+      description: `${name} was removed from your client list`,
+      icon: <Trash2 className="h-4 w-4" />,
+    });
+  }
+
   const exportToExcel = () => {
     if (shipments.length === 0) return;
-    
-    const rows = shipments.map(s => ({
+
+    const rows = shipments.map((s) => ({
       "Bayan No": s.bayanNo,
       "Client's Name": s.clientName,
       "Type": s.shipmentType,
       "Containers": s.containersCount,
       "Container Number": s.containerNumber,
       "Last Pullout Date": s.lastPulloutDate,
+      "Hijri Date": s.hijriDate ?? "",
       "Terminal": s.terminal,
-      "Added": format(new Date(s.addedAt), "yyyy-MM-dd HH:mm")
+      "Added": format(new Date(s.addedAt), "yyyy-MM-dd HH:mm"),
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Shipments');
+    XLSX.utils.book_append_sheet(wb, ws, "Shipments");
     const filename = `shipments-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
     XLSX.writeFile(wb, filename);
   };
@@ -104,15 +119,22 @@ export default function Dashboard() {
       <AppHeader />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
-        
+
         {/* Entry Form */}
         <Card className="shadow-sm border-border/60">
           <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Ship className="h-5 w-5 text-primary" />
-              Log New Shipment
-            </CardTitle>
-            <CardDescription>Enter details for incoming terminal shipments</CardDescription>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <Ship className="h-5 w-5 text-primary" />
+                  Log New Shipment
+                </CardTitle>
+                <CardDescription>Enter details for incoming terminal shipments</CardDescription>
+              </div>
+              <AddClientButton
+                onSuccess={(name) => form.setValue("clientName", name, { shouldValidate: true })}
+              />
+            </div>
           </CardHeader>
           <CardContent className="pt-6">
             <Form {...form}>
@@ -131,28 +153,53 @@ export default function Dashboard() {
                       </FormItem>
                     )}
                   />
-                  
+
                   <FormField
                     control={form.control}
                     name="clientName"
                     render={({ field }) => (
                       <FormItem>
-                        <div className="flex items-center justify-between">
-                          <FormLabel>Client's Name</FormLabel>
-                          <AddClientButton onSuccess={(name) => field.onChange(name)} />
+                        <FormLabel>Client's Name</FormLabel>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <Select
+                              onValueChange={field.onChange}
+                              value={field.value}
+                              disabled={clients.length === 0}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue
+                                    placeholder={
+                                      clients.length === 0
+                                        ? "No clients yet — add one"
+                                        : "Select client"
+                                    }
+                                  />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {clients.map((c) => (
+                                  <SelectItem key={c.id} value={c.name}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/40 disabled:opacity-40"
+                            disabled={!field.value}
+                            onClick={() => handleDeleteClient(field.value)}
+                            aria-label="Delete selected client"
+                            title={field.value ? `Remove client ${field.value}` : "Select a client to remove"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={clients.length === 0}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder={clients.length === 0 ? "No clients yet — add one" : "Select client"} />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {clients.map(c => (
-                              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -194,8 +241,10 @@ export default function Dashboard() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
-                              <SelectItem key={num} value={String(num)}>{num}</SelectItem>
+                            {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
+                              <SelectItem key={num} value={String(num)}>
+                                {num}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -252,18 +301,26 @@ export default function Dashboard() {
                         <FormControl>
                           <Input type="date" {...field} />
                         </FormControl>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-1">
-                          <CalendarDays className="h-3 w-3 text-primary/70" />
-                          <span>
-                            <span className="font-medium text-foreground/70">Today (Hijri):</span> {hijriDate}
-                          </span>
-                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="hijriDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Hijri Date</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. 16 Dhu al-Qi'dah 1447" {...field} />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                 </div>
-                
+
                 <div className="flex justify-end pt-2 border-t border-border/40">
                   <Button type="submit" className="min-w-[150px]">
                     Log Shipment
@@ -281,9 +338,9 @@ export default function Dashboard() {
               <CardTitle className="text-lg font-semibold">Active Shipments</CardTitle>
               <CardDescription className="mt-1">Recent entries logged in the system</CardDescription>
             </div>
-            <Button 
-              variant="outline" 
-              onClick={exportToExcel} 
+            <Button
+              variant="outline"
+              onClick={exportToExcel}
               disabled={shipments.length === 0}
               className="gap-2 bg-background"
             >
@@ -291,7 +348,7 @@ export default function Dashboard() {
               Export to Excel
             </Button>
           </div>
-          
+
           <div className="overflow-x-auto">
             {shipments.length === 0 ? (
               <div className="py-24 flex flex-col items-center justify-center text-center px-4">
@@ -314,6 +371,7 @@ export default function Dashboard() {
                     <TableHead className="font-semibold">Container #</TableHead>
                     <TableHead className="font-semibold">Terminal</TableHead>
                     <TableHead className="font-semibold">Pullout Date</TableHead>
+                    <TableHead className="font-semibold">Hijri Date</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -335,6 +393,9 @@ export default function Dashboard() {
                         </span>
                       </TableCell>
                       <TableCell>{format(new Date(shipment.lastPulloutDate), "MMM d, yyyy")}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                        {shipment.hijriDate || "—"}
+                      </TableCell>
                       <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
                         {formatDistanceToNow(new Date(shipment.addedAt), { addSuffix: true })}
                       </TableCell>

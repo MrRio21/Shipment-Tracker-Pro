@@ -11,6 +11,7 @@ export interface Shipment {
   containersCount: number;
   containerNumber: string;
   lastPulloutDate: string;
+  hijriDate: string;
   terminal: Terminal;
   addedAt: string;
 }

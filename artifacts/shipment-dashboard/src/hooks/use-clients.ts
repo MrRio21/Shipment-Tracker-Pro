@@ -19,5 +19,9 @@ export function useClients() {
     ]);
   };
 
-  return { clients, addClient };
+  const removeClient = (id: string) => {
+    setClients((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  return { clients, addClient, removeClient };
 }
