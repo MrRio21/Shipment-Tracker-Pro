@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, FileSpreadsheet, Ship } from "lucide-react";
+import { CalendarDays, FileSpreadsheet, Ship } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -55,6 +55,12 @@ export default function Dashboard() {
       terminal: "RSGT",
     },
   });
+
+  const hijriDate = new Intl.DateTimeFormat("en-TN-u-ca-islamic-umalqura", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
 
   if (!isAuthenticated) return null;
 
@@ -246,6 +252,12 @@ export default function Dashboard() {
                         <FormControl>
                           <Input type="date" {...field} />
                         </FormControl>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-1">
+                          <CalendarDays className="h-3 w-3 text-primary/70" />
+                          <span>
+                            <span className="font-medium text-foreground/70">Today (Hijri):</span> {hijriDate}
+                          </span>
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useLocalStorageState } from "./use-local-storage-state";
 
 export interface Driver {
   id: string;
@@ -8,38 +8,22 @@ export interface Driver {
 }
 
 const STORAGE_KEY = "shipment-drivers";
+const EMPTY: Driver[] = [];
 
 export function useDrivers() {
-  const [drivers, setDrivers] = useState<Driver[]>(() => {
-    try {
-      const item = window.localStorage.getItem(STORAGE_KEY);
-      return item ? JSON.parse(item) : [];
-    } catch (error) {
-      console.error(error);
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(drivers));
-    } catch (error) {
-      console.error(error);
-    }
-  }, [drivers]);
+  const [drivers, setDrivers] = useLocalStorageState<Driver[]>(STORAGE_KEY, EMPTY);
 
   const addDriver = (data: { name: string; phone: string }) => {
-    const newDriver: Driver = {
-      id: crypto.randomUUID(),
-      name: data.name,
-      phone: data.phone,
-      addedAt: new Date().toISOString()
-    };
-    setDrivers(prev => [newDriver, ...prev]);
+    setDrivers((prev) => [
+      {
+        id: crypto.randomUUID(),
+        name: data.name,
+        phone: data.phone,
+        addedAt: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
   };
 
-  return {
-    drivers,
-    addDriver
-  };
+  return { drivers, addDriver };
 }

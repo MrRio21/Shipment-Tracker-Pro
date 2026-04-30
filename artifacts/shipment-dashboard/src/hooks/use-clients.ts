@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useLocalStorageState } from "./use-local-storage-state";
 
 export interface Client {
   id: string;
@@ -7,37 +7,17 @@ export interface Client {
 }
 
 const STORAGE_KEY = "shipment-clients";
+const EMPTY: Client[] = [];
 
 export function useClients() {
-  const [clients, setClients] = useState<Client[]>(() => {
-    try {
-      const item = window.localStorage.getItem(STORAGE_KEY);
-      return item ? JSON.parse(item) : [];
-    } catch (error) {
-      console.error(error);
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients));
-    } catch (error) {
-      console.error(error);
-    }
-  }, [clients]);
+  const [clients, setClients] = useLocalStorageState<Client[]>(STORAGE_KEY, EMPTY);
 
   const addClient = (name: string) => {
-    const newClient: Client = {
-      id: crypto.randomUUID(),
-      name,
-      addedAt: new Date().toISOString()
-    };
-    setClients(prev => [newClient, ...prev]);
+    setClients((prev) => [
+      { id: crypto.randomUUID(), name, addedAt: new Date().toISOString() },
+      ...prev,
+    ]);
   };
 
-  return {
-    clients,
-    addClient
-  };
+  return { clients, addClient };
 }

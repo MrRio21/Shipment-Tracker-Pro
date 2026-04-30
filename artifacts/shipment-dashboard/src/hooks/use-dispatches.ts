@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useLocalStorageState } from "./use-local-storage-state";
 
 export interface Dispatch {
   id: string;
@@ -7,40 +7,39 @@ export interface Dispatch {
   truckInfo: string;
   entryTime: string;
   addedAt: string;
+  returnedAt: string | null;
 }
 
 const STORAGE_KEY = "shipment-dispatches";
+const EMPTY: Dispatch[] = [];
 
 export function useDispatches() {
-  const [dispatches, setDispatches] = useState<Dispatch[]>(() => {
-    try {
-      const item = window.localStorage.getItem(STORAGE_KEY);
-      return item ? JSON.parse(item) : [];
-    } catch (error) {
-      console.error(error);
-      return [];
-    }
-  });
+  const [dispatches, setDispatches] = useLocalStorageState<Dispatch[]>(
+    STORAGE_KEY,
+    EMPTY,
+  );
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(dispatches));
-    } catch (error) {
-      console.error(error);
-    }
-  }, [dispatches]);
-
-  const addDispatch = (dispatch: Omit<Dispatch, "id" | "addedAt">) => {
-    const newDispatch: Dispatch = {
-      ...dispatch,
-      id: crypto.randomUUID(),
-      addedAt: new Date().toISOString()
-    };
-    setDispatches(prev => [newDispatch, ...prev]);
+  const addDispatch = (
+    dispatch: Omit<Dispatch, "id" | "addedAt" | "returnedAt">,
+  ) => {
+    setDispatches((prev) => [
+      {
+        ...dispatch,
+        id: crypto.randomUUID(),
+        addedAt: new Date().toISOString(),
+        returnedAt: null,
+      },
+      ...prev,
+    ]);
   };
 
-  return {
-    dispatches,
-    addDispatch
+  const markReturned = (id: string) => {
+    setDispatches((prev) =>
+      prev.map((d) =>
+        d.id === id ? { ...d, returnedAt: new Date().toISOString() } : d,
+      ),
+    );
   };
+
+  return { dispatches, addDispatch, markReturned };
 }

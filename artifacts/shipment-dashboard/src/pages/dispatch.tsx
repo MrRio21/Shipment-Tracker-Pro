@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileSpreadsheet, Truck, Users } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, Truck, Users } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -34,7 +34,7 @@ export default function Dispatch() {
   const { isAuthenticated } = useAuth();
   const { shipments } = useShipments();
   const { drivers } = useDrivers();
-  const { dispatches, addDispatch } = useDispatches();
+  const { dispatches, addDispatch, markReturned } = useDispatches();
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -54,57 +54,67 @@ export default function Dispatch() {
 
   if (!isAuthenticated) return null;
 
+  const isDriverBusy = (driverId: string) =>
+    dispatches.some((d) => d.driverId === driverId && d.returnedAt == null);
+
   function onSubmit(data: DispatchFormValues) {
     addDispatch(data);
     form.reset({
-      ...form.getValues(),
       containerNumber: "",
       driverId: "",
       truckInfo: "",
-      entryTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"), // reset to now
+      entryTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     });
-    
-    const driverName = drivers.find(d => d.id === data.driverId)?.name || "Unknown Driver";
+
+    const driverName = drivers.find((d) => d.id === data.driverId)?.name || "Unknown Driver";
     toast.success("Dispatch logged successfully", {
       description: `Container ${data.containerNumber} assigned to ${driverName}`,
       icon: <Truck className="h-4 w-4" />,
     });
   }
 
+  function onMarkReturned(dispatchId: string, driverName: string, containerNumber: string) {
+    markReturned(dispatchId);
+    toast.success("Dispatch marked as returned", {
+      description: `${driverName} is now available · Container ${containerNumber}`,
+      icon: <CheckCircle2 className="h-4 w-4" />,
+    });
+  }
+
   const exportToExcel = () => {
     if (dispatches.length === 0) return;
-    
-    const rows = dispatches.map(d => {
-      const driver = drivers.find(drv => drv.id === d.driverId);
-      const isBusy = dispatches.some(disp => disp.driverId === d.driverId);
 
+    const rows = dispatches.map((d) => {
+      const driver = drivers.find((drv) => drv.id === d.driverId);
       return {
         "Container Number": d.containerNumber,
         "Driver Name": driver?.name || "Unknown",
         "Phone": driver?.phone || "N/A",
         "Truck": d.truckInfo,
         "Entry Time": format(new Date(d.entryTime), "yyyy-MM-dd HH:mm"),
-        "Driver Status": isBusy ? "Busy" : "Available",
-        "Added": format(new Date(d.addedAt), "yyyy-MM-dd HH:mm")
+        "Dispatch Status": d.returnedAt ? "Returned" : "Active",
+        "Returned At": d.returnedAt ? format(new Date(d.returnedAt), "yyyy-MM-dd HH:mm") : "",
+        "Driver Status": driver && isDriverBusy(driver.id) ? "Busy" : "Available",
+        "Added": format(new Date(d.addedAt), "yyyy-MM-dd HH:mm"),
       };
     });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Dispatches');
+    XLSX.utils.book_append_sheet(wb, ws, "Dispatches");
     const filename = `dispatches-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
     XLSX.writeFile(wb, filename);
   };
 
   // Deduplicate container numbers for the select
-  const uniqueContainers = Array.from(new Set(shipments.map(s => s.containerNumber))).sort();
+  const uniqueContainers = Array.from(new Set(shipments.map((s) => s.containerNumber))).sort();
 
   return (
     <div className="min-h-screen bg-muted/30 pb-12">
       <AppHeader />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
-        
+
         {/* Drivers Section */}
         <Card className="shadow-sm border-border/60">
           <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
@@ -130,13 +140,16 @@ export default function Dispatch() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {drivers.map(driver => {
-                  const isBusy = dispatches.some(d => d.driverId === driver.id);
+                {drivers.map((driver) => {
+                  const busy = isDriverBusy(driver.id);
                   return (
-                    <div key={driver.id} className="p-4 rounded-lg border border-border/50 bg-background flex flex-col gap-2">
+                    <div
+                      key={driver.id}
+                      className="p-4 rounded-lg border border-border/50 bg-background flex flex-col gap-2"
+                    >
                       <div className="flex justify-between items-start">
                         <span className="font-semibold text-sm">{driver.name}</span>
-                        {isBusy ? (
+                        {busy ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20">
                             Busy
                           </span>
@@ -168,7 +181,7 @@ export default function Dispatch() {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  
+
                   <FormField
                     control={form.control}
                     name="containerNumber"
@@ -182,7 +195,7 @@ export default function Dispatch() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {uniqueContainers.map(c => (
+                            {uniqueContainers.map((c) => (
                               <SelectItem key={c} value={c}>{c}</SelectItem>
                             ))}
                           </SelectContent>
@@ -205,8 +218,11 @@ export default function Dispatch() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {drivers.map(d => (
-                              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                            {drivers.map((d) => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.name}
+                                {isDriverBusy(d.id) ? " · Busy" : ""}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -244,7 +260,7 @@ export default function Dispatch() {
                   />
 
                 </div>
-                
+
                 <div className="flex justify-end pt-2 border-t border-border/40">
                   <Button type="submit" className="min-w-[150px]" disabled={uniqueContainers.length === 0 || drivers.length === 0}>
                     Log Dispatch
@@ -262,9 +278,9 @@ export default function Dispatch() {
               <CardTitle className="text-lg font-semibold">Dispatch Records</CardTitle>
               <CardDescription className="mt-1">Recent dispatch assignments</CardDescription>
             </div>
-            <Button 
-              variant="outline" 
-              onClick={exportToExcel} 
+            <Button
+              variant="outline"
+              onClick={exportToExcel}
               disabled={dispatches.length === 0}
               className="gap-2 bg-background"
             >
@@ -272,7 +288,7 @@ export default function Dispatch() {
               Export to Excel
             </Button>
           </div>
-          
+
           <div className="overflow-x-auto">
             {dispatches.length === 0 ? (
               <div className="py-24 flex flex-col items-center justify-center text-center px-4">
@@ -294,24 +310,52 @@ export default function Dispatch() {
                     <TableHead className="font-semibold">Truck</TableHead>
                     <TableHead className="font-semibold">Entry Time</TableHead>
                     <TableHead className="font-semibold">Status</TableHead>
+                    <TableHead className="font-semibold">Action</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {dispatches.map((dispatch) => {
-                    const driver = drivers.find(d => d.id === dispatch.driverId);
-                    const isBusy = true; // since this driver appears in ANY dispatch record by definition of being here
+                    const driver = drivers.find((d) => d.id === dispatch.driverId);
+                    const driverName = driver?.name || "Unknown";
+                    const isReturned = dispatch.returnedAt != null;
                     return (
                       <TableRow key={dispatch.id} className="group">
                         <TableCell className="uppercase font-mono text-xs">{dispatch.containerNumber}</TableCell>
-                        <TableCell className="font-medium text-foreground">{driver?.name || "Unknown"}</TableCell>
+                        <TableCell className="font-medium text-foreground">{driverName}</TableCell>
                         <TableCell>{driver?.phone || "N/A"}</TableCell>
                         <TableCell>{dispatch.truckInfo}</TableCell>
                         <TableCell>{format(new Date(dispatch.entryTime), "MMM d, yyyy HH:mm")}</TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                            Busy
-                          </span>
+                          {isReturned ? (
+                            <span className="inline-flex flex-col gap-0.5">
+                              <span className="inline-flex w-fit items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                Returned
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {formatDistanceToNow(new Date(dispatch.returnedAt!), { addSuffix: true })}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                              Active
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {isReturned ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 h-8 text-xs"
+                              onClick={() => onMarkReturned(dispatch.id, driverName, dispatch.containerNumber)}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                              Mark Returned
+                            </Button>
+                          )}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
                           {formatDistanceToNow(new Date(dispatch.addedAt), { addSuffix: true })}
