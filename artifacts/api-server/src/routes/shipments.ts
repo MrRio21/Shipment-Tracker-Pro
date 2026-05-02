@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, shipmentsTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 
 const router = Router();
@@ -63,6 +63,18 @@ router.post("/", async (req, res) => {
     .returning();
 
   res.status(201).json(shipment);
+});
+
+router.delete("/:id", async (req, res) => {
+  const [deleted] = await db
+    .delete(shipmentsTable)
+    .where(eq(shipmentsTable.id, String(req.params.id)))
+    .returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Shipment not found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

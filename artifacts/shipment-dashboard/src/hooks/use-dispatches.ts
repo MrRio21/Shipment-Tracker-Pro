@@ -66,5 +66,10 @@ export function useDispatches() {
     );
   }, []);
 
-  return { dispatches, isLoading, addDispatch, markReturned, refresh };
+  const removeDispatch = useCallback(async (id: string) => {
+    await apiFetch(`/dispatches/${id}`, { method: "DELETE" });
+    setDispatches((prev) => prev.filter((d) => d.id !== id));
+  }, []);
+
+  return { dispatches, isLoading, addDispatch, markReturned, removeDispatch, refresh };
 }

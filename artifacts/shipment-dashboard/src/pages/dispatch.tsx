@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Combobox } from "@/components/ui/combobox";
-import { CheckCircle2, FileSpreadsheet, Loader2, Search, Truck, Users } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, Loader2, Search, Trash2, Truck, Users } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -39,7 +39,7 @@ export default function Dispatch() {
   const { shipments } = useShipments();
   const { drivers, addDriver } = useDrivers();
   const { trucks } = useTrucks();
-  const { dispatches, isLoading: dispatchesLoading, addDispatch, markReturned } = useDispatches();
+  const { dispatches, isLoading: dispatchesLoading, addDispatch, markReturned, removeDispatch } = useDispatches();
   const [dispatchQuery, setDispatchQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -121,6 +121,18 @@ export default function Dispatch() {
   }
 
   if (!isAuthenticated) return null;
+
+  async function handleDeleteDispatch(id: string, containerNumber: string) {
+    if (!window.confirm(`Are you sure you want to delete the dispatch record for container "${containerNumber}"?\nThis action cannot be undone.`)) return;
+    try {
+      await removeDispatch(id);
+      toast.success("Dispatch deleted", { description: `Container ${containerNumber} dispatch record removed` });
+    } catch (err) {
+      toast.error("Failed to delete dispatch", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    }
+  }
 
   async function onSubmit(data: DispatchFormValues) {
     setSubmitting(true);
@@ -477,6 +489,7 @@ export default function Dispatch() {
                     <TableHead className="font-semibold">Status</TableHead>
                     <TableHead className="font-semibold">Action</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
+                    <TableHead className="font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -534,6 +547,17 @@ export default function Dispatch() {
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
                           {formatDistanceToNow(new Date(dispatch.createdAt), { addSuffix: true })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteDispatch(dispatch.id, dispatch.containerNumber)}
+                            aria-label="Delete dispatch"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );

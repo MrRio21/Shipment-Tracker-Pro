@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Combobox } from "@/components/ui/combobox";
 import { AppHeader } from "@/components/app-header";
-import { Loader2, Settings, UserPlus } from "lucide-react";
+import { Loader2, Settings, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -66,6 +66,19 @@ export default function Users() {
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
+  }
+
+  async function handleDeleteUser(id: string, email: string) {
+    if (!window.confirm(`Are you sure you want to delete user "${email}"?\nThis action cannot be undone.`)) return;
+    try {
+      await apiFetch(`/users/${id}`, { method: "DELETE" });
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+      toast.success("User deleted", { description: `${email} has been removed` });
+    } catch (err) {
+      toast.error("Failed to delete user", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -202,6 +215,7 @@ export default function Users() {
                     <TableHead className="font-semibold">Email</TableHead>
                     <TableHead className="font-semibold">Role</TableHead>
                     <TableHead className="font-semibold text-right">Created</TableHead>
+                    <TableHead className="font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -228,6 +242,18 @@ export default function Users() {
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground text-sm">
                         {format(new Date(u.createdAt), "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-40"
+                          disabled={u.id === user?.id}
+                          title={u.id === user?.id ? "You cannot delete your own account" : "Delete user"}
+                          onClick={() => handleDeleteUser(u.id, u.email)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

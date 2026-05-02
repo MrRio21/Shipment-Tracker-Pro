@@ -86,6 +86,18 @@ router.post("/", async (req, res) => {
   res.status(201).json({ ...dispatch, driver: driver ?? null, truck: truck ?? null });
 });
 
+router.delete("/:id", async (req, res) => {
+  const [deleted] = await db
+    .delete(dispatchesTable)
+    .where(eq(dispatchesTable.id, String(req.params.id)))
+    .returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Dispatch not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 router.patch("/:id/return", requireAuth, async (req, res) => {
   const [dispatch] = await db
     .update(dispatchesTable)

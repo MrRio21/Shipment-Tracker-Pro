@@ -59,7 +59,12 @@ export function useShipments() {
     [],
   );
 
-  return { shipments, isLoading, addShipment, refresh };
+  const removeShipment = useCallback(async (id: string) => {
+    await apiFetch(`/shipments/${id}`, { method: "DELETE" });
+    setShipments((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
+  return { shipments, isLoading, addShipment, removeShipment, refresh };
 }
 
 // Helpers kept for backward-compat with table render code

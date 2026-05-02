@@ -63,7 +63,7 @@ type ShipmentFormValues = z.infer<typeof shipmentSchema>;
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { shipments, isLoading: shipmentsLoading, addShipment } = useShipments();
+  const { shipments, isLoading: shipmentsLoading, addShipment, removeShipment } = useShipments();
   const { clients, removeClient } = useClients();
   const [shipmentsQuery, setShipmentsQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -180,6 +180,18 @@ export default function Dashboard() {
       });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteShipment(id: string, bayanNo: string) {
+    if (!window.confirm(`Are you sure you want to delete shipment "${bayanNo}"?\nThis action cannot be undone.`)) return;
+    try {
+      await removeShipment(id);
+      toast.success("Shipment deleted", { description: `Bayan No ${bayanNo} has been removed` });
+    } catch (err) {
+      toast.error("Failed to delete shipment", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
     }
   }
 
@@ -526,6 +538,7 @@ export default function Dashboard() {
                     <TableHead className="font-semibold">Terminal</TableHead>
                     <TableHead className="font-semibold">Pullout (Hijri)</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
+                    <TableHead className="font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -551,6 +564,17 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
                         {formatDistanceToNow(new Date(shipment.createdAt), { addSuffix: true })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDeleteShipment(shipment.id, shipment.bayanNo)}
+                          aria-label="Delete shipment"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

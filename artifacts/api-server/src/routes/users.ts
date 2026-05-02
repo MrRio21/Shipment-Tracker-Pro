@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import { db, usersTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 
 const router = Router();
@@ -58,6 +58,24 @@ router.post("/", async (req, res) => {
   } catch {
     res.status(409).json({ error: "A user with this email already exists" });
   }
+});
+
+router.delete("/:id", async (req, res) => {
+  const targetId = String(req.params.id);
+  // Prevent self-deletion
+  if (req.session.userId === targetId) {
+    res.status(400).json({ error: "You cannot delete your own account" });
+    return;
+  }
+  const [deleted] = await db
+    .delete(usersTable)
+    .where(eq(usersTable.id, targetId))
+    .returning({ id: usersTable.id });
+  if (!deleted) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;
