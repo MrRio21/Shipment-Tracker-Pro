@@ -1,27 +1,47 @@
-import { useLocalStorageState } from "./use-local-storage-state";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./use-api";
 
 export interface Client {
   id: string;
   name: string;
-  addedAt: string;
+  createdAt: string;
 }
 
-const STORAGE_KEY = "shipment-clients";
-const EMPTY: Client[] = [];
-
 export function useClients() {
-  const [clients, setClients] = useLocalStorageState<Client[]>(STORAGE_KEY, EMPTY);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addClient = (name: string) => {
-    setClients((prev) => [
-      { id: crypto.randomUUID(), name, addedAt: new Date().toISOString() },
-      ...prev,
-    ]);
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await apiFetch<Client[]>("/clients");
+      setClients(data);
+    } catch {
+      // silently ignore auth errors (page will redirect)
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const removeClient = (id: string) => {
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addClient = useCallback(
+    async (name: string): Promise<Client> => {
+      const client = await apiFetch<Client>("/clients", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      setClients((prev) => [client, ...prev]);
+      return client;
+    },
+    [],
+  );
+
+  const removeClient = useCallback(async (id: string) => {
+    await apiFetch(`/clients/${id}`, { method: "DELETE" });
     setClients((prev) => prev.filter((c) => c.id !== id));
-  };
+  }, []);
 
-  return { clients, addClient, removeClient };
+  return { clients, isLoading, addClient, removeClient, refresh };
 }

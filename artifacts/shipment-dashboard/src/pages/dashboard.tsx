@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useShipments, getContainerNumbers, getHijriDate } from "@/hooks/use-shipments";
+import { useShipments } from "@/hooks/use-shipments";
 import { useClients } from "@/hooks/use-clients";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Combobox } from "@/components/ui/combobox";
-import { FileSpreadsheet, Search, Ship, Trash2 } from "lucide-react";
+import { FileSpreadsheet, Loader2, Search, Ship, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -46,37 +46,33 @@ const CONTAINERS_COUNT_OPTIONS = Array.from({ length: 20 }, (_, i) => ({
   label: String(i + 1),
 }));
 
-const shipmentSchema = z
-  .object({
-    bayanNo: z.string().min(1, { message: "Bayan No is required" }),
-    clientName: z.string().min(1, { message: "Client Name is required" }),
-    shipmentType: z.enum(["LCL", "FCL", "AIR"], { required_error: "Type is required" }),
-    containersCount: z.coerce.number().int().min(1).max(20),
-    containerNumbers: z
-      .array(z.string().min(1, { message: "Container number is required" }))
-      .min(1),
-    lastPulloutDateHijri: z.string().min(1, { message: "Hijri pullout date is required" }),
-    terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
-  })
-  .refine((data) => data.containerNumbers.length === data.containersCount, {
-    message: "Number of container entries must match the selected containers count",
-    path: ["containerNumbers"],
-  });
+const shipmentSchema = z.object({
+  bayanNo: z.string().min(1, { message: "Bayan No is required" }),
+  clientName: z.string().min(1, { message: "Client Name is required" }),
+  shipmentType: z.enum(["LCL", "FCL", "AIR"], { required_error: "Type is required" }),
+  containersCount: z.coerce.number().int().min(1).max(20),
+  containerNumbers: z
+    .array(z.string().min(1, { message: "Container number is required" }))
+    .min(1),
+  lastPulloutDateHijri: z.string().min(1, { message: "Hijri pullout date is required" }),
+  terminal: z.enum(["RSGT", "DP", "MAW", "SAL", "SATS"], { required_error: "Terminal is required" }),
+});
 
 type ShipmentFormValues = z.infer<typeof shipmentSchema>;
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated } = useAuth();
-  const { shipments, addShipment } = useShipments();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { shipments, isLoading: shipmentsLoading, addShipment } = useShipments();
   const { clients, removeClient } = useClients();
   const [shipmentsQuery, setShipmentsQuery] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       setLocation("/");
     }
-  }, [isAuthenticated, setLocation]);
+  }, [isAuthenticated, authLoading, setLocation]);
 
   const form = useForm<ShipmentFormValues>({
     resolver: zodResolver(shipmentSchema),
@@ -93,7 +89,6 @@ export default function Dashboard() {
 
   const containersCount = Number(form.watch("containersCount")) || 1;
 
-  // Resize the container number array whenever the count changes.
   useEffect(() => {
     const current = form.getValues("containerNumbers") || [];
     if (current.length === containersCount) return;
@@ -121,9 +116,9 @@ export default function Dashboard() {
         s.clientName,
         s.shipmentType,
         String(s.containersCount),
-        ...getContainerNumbers(s),
+        s.containerNumber,
         s.terminal,
-        getHijriDate(s),
+        s.lastPulloutDateHijri,
       ]
         .join(" ")
         .toLowerCase();
@@ -131,52 +126,78 @@ export default function Dashboard() {
     });
   }, [shipments, shipmentsQuery]);
 
-  if (!isAuthenticated) return null;
-
-  function onSubmit(data: ShipmentFormValues) {
-    // Split: one shipment record per container number.
-    const numbers = data.containerNumbers.filter((n) => n.trim().length > 0);
-    numbers.forEach((num) => {
-      addShipment({
-        bayanNo: data.bayanNo,
-        clientName: data.clientName,
-        shipmentType: data.shipmentType,
-        containersCount: 1,
-        containerNumbers: [num.trim()],
-        lastPulloutDateHijri: data.lastPulloutDateHijri,
-        terminal: data.terminal,
-      });
-    });
-
-    form.reset({
-      ...form.getValues(),
-      bayanNo: "",
-      containerNumbers: Array.from({ length: data.containersCount }, () => ""),
-      lastPulloutDateHijri: todayHijri(),
-    });
-
-    const count = numbers.length;
-    toast.success(
-      count === 1 ? "Shipment added successfully" : `${count} shipments added successfully`,
-      {
-        description:
-          count === 1
-            ? `Bayan No ${data.bayanNo} for ${data.clientName}`
-            : `Bayan No ${data.bayanNo} — ${count} containers logged as separate records`,
-        icon: <Ship className="h-4 w-4" />,
-      },
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-muted/30 flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
     );
   }
 
-  function handleDeleteClient(name: string) {
+  if (!isAuthenticated) return null;
+
+  async function onSubmit(data: ShipmentFormValues) {
+    const numbers = data.containerNumbers.filter((n) => n.trim().length > 0);
+    if (numbers.length === 0) return;
+
+    setSubmitting(true);
+    try {
+      await Promise.all(
+        numbers.map((num) =>
+          addShipment({
+            bayanNo: data.bayanNo,
+            clientName: data.clientName,
+            shipmentType: data.shipmentType,
+            containersCount: 1,
+            containerNumber: num.trim().toUpperCase(),
+            terminal: data.terminal,
+            lastPulloutDateHijri: data.lastPulloutDateHijri,
+          }),
+        ),
+      );
+
+      form.reset({
+        ...form.getValues(),
+        bayanNo: "",
+        containerNumbers: Array.from({ length: data.containersCount }, () => ""),
+        lastPulloutDateHijri: todayHijri(),
+      });
+
+      const count = numbers.length;
+      toast.success(
+        count === 1 ? "Shipment added successfully" : `${count} shipments added successfully`,
+        {
+          description:
+            count === 1
+              ? `Bayan No ${data.bayanNo} for ${data.clientName}`
+              : `Bayan No ${data.bayanNo} — ${count} containers logged as separate records`,
+          icon: <Ship className="h-4 w-4" />,
+        },
+      );
+    } catch (err) {
+      toast.error("Failed to save shipment", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteClient(name: string) {
     const client = clients.find((c) => c.name === name);
     if (!client) return;
-    removeClient(client.id);
-    form.setValue("clientName", "", { shouldValidate: false });
-    toast.success("Client removed", {
-      description: `${name} was removed from your client list`,
-      icon: <Trash2 className="h-4 w-4" />,
-    });
+    try {
+      await removeClient(client.id);
+      form.setValue("clientName", "", { shouldValidate: false });
+      toast.success("Client removed", {
+        description: `${name} was removed from your client list`,
+        icon: <Trash2 className="h-4 w-4" />,
+      });
+    } catch (err) {
+      toast.error("Failed to remove client", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    }
   }
 
   const exportToExcel = () => {
@@ -184,19 +205,17 @@ export default function Dashboard() {
       "Bayan No": s.bayanNo,
       "Client's Name": s.clientName,
       "Type": s.shipmentType,
-      "Containers": s.containersCount,
-      "Container Numbers": getContainerNumbers(s).join(", "),
-      "Last Pullout Date (Hijri)": getHijriDate(s),
+      "Container Number": s.containerNumber,
       "Terminal": s.terminal,
-      "Added": format(new Date(s.addedAt), "yyyy-MM-dd HH:mm"),
+      "Last Pullout Date (Hijri)": s.lastPulloutDateHijri,
+      "Added": format(new Date(s.createdAt), "yyyy-MM-dd HH:mm"),
     }));
     if (rows.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Shipments");
-    const filename = `shipments-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
-    XLSX.writeFile(wb, filename);
+    XLSX.writeFile(wb, `shipments-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
   };
 
   const selectedClientLabel = form.watch("clientName");
@@ -206,7 +225,6 @@ export default function Dashboard() {
       <AppHeader />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
-
         {/* Entry Form */}
         <Card className="shadow-sm border-border/60">
           <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
@@ -234,7 +252,7 @@ export default function Dashboard() {
                       <FormItem>
                         <FormLabel>Bayan No</FormLabel>
                         <FormControl>
-                          <Input placeholder="e.g. 10029384" {...field} />
+                          <Input placeholder="e.g. 10029384" {...field} disabled={submitting} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -261,7 +279,7 @@ export default function Dashboard() {
                                 }
                                 searchPlaceholder="Type to search clients..."
                                 emptyText="No matching client."
-                                disabled={clientOptions.length === 0}
+                                disabled={clientOptions.length === 0 || submitting}
                               />
                             </FormControl>
                           </div>
@@ -270,14 +288,9 @@ export default function Dashboard() {
                             variant="outline"
                             size="icon"
                             className="h-9 w-9 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/40 disabled:opacity-40"
-                            disabled={!selectedClientLabel}
+                            disabled={!selectedClientLabel || submitting}
                             onClick={() => handleDeleteClient(selectedClientLabel)}
                             aria-label="Delete selected client"
-                            title={
-                              selectedClientLabel
-                                ? `Remove client ${selectedClientLabel}`
-                                : "Select a client to remove"
-                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -300,6 +313,7 @@ export default function Dashboard() {
                             onChange={field.onChange}
                             placeholder="Select type"
                             searchPlaceholder="Search types..."
+                            disabled={submitting}
                           />
                         </FormControl>
                         <FormMessage />
@@ -320,6 +334,7 @@ export default function Dashboard() {
                             onChange={(v) => field.onChange(Number(v))}
                             placeholder="Select count"
                             searchPlaceholder="Search count..."
+                            disabled={submitting}
                           />
                         </FormControl>
                         <FormMessage />
@@ -340,6 +355,7 @@ export default function Dashboard() {
                             onChange={field.onChange}
                             placeholder="Select terminal"
                             searchPlaceholder="Search terminals..."
+                            disabled={submitting}
                           />
                         </FormControl>
                         <FormMessage />
@@ -383,7 +399,8 @@ export default function Dashboard() {
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">Container Numbers</h3>
                     <p className="text-xs text-muted-foreground">
-                      Enter {containersCount} container {containersCount === 1 ? "number" : "numbers"} — each will be saved as its own shipment record
+                      Enter {containersCount} container{" "}
+                      {containersCount === 1 ? "number" : "numbers"} — each saves as its own record
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -401,6 +418,7 @@ export default function Dashboard() {
                               <Input
                                 placeholder={`MSKU000000${(i + 1) % 10}`}
                                 className="uppercase font-mono text-sm"
+                                disabled={submitting}
                                 {...field}
                               />
                             </FormControl>
@@ -413,8 +431,15 @@ export default function Dashboard() {
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-border/40">
-                  <Button type="submit" className="min-w-[150px]">
-                    Log Shipment
+                  <Button type="submit" className="min-w-[150px]" disabled={submitting}>
+                    {submitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Log Shipment"
+                    )}
                   </Button>
                 </div>
               </form>
@@ -429,18 +454,24 @@ export default function Dashboard() {
               <div>
                 <CardTitle className="text-lg font-semibold">Active Shipments</CardTitle>
                 <CardDescription className="mt-1">
-                  Recent entries logged in the system
-                  {shipmentsQuery && (
-                    <span className="ml-1 text-foreground">
-                      · showing {filteredShipments.length} of {shipments.length}
-                    </span>
+                  {shipmentsLoading ? (
+                    "Loading..."
+                  ) : (
+                    <>
+                      {shipments.length} record{shipments.length !== 1 ? "s" : ""} in the database
+                      {shipmentsQuery && (
+                        <span className="ml-1 text-foreground">
+                          · showing {filteredShipments.length}
+                        </span>
+                      )}
+                    </>
                   )}
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 onClick={exportToExcel}
-                disabled={filteredShipments.length === 0}
+                disabled={filteredShipments.length === 0 || shipmentsLoading}
                 className="gap-2 bg-background"
               >
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
@@ -453,21 +484,25 @@ export default function Dashboard() {
                 type="search"
                 value={shipmentsQuery}
                 onChange={(e) => setShipmentsQuery(e.target.value)}
-                placeholder="Search by Bayan, client, container, terminal..."
+                placeholder="Search by Bayan No, client, container, terminal..."
                 className="pl-9 bg-background"
               />
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            {shipments.length === 0 ? (
+            {shipmentsLoading ? (
+              <div className="py-16 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : shipments.length === 0 ? (
               <div className="py-24 flex flex-col items-center justify-center text-center px-4">
                 <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
                   <Ship className="h-8 w-8 text-muted-foreground/50" />
                 </div>
                 <h3 className="text-lg font-medium text-foreground">No shipments logged</h3>
                 <p className="text-muted-foreground mt-2 max-w-sm">
-                  Shipments you add will appear here. Start by filling out the form above.
+                  Start by filling out the form above.
                 </p>
               </div>
             ) : filteredShipments.length === 0 ? (
@@ -476,8 +511,8 @@ export default function Dashboard() {
                   <Search className="h-6 w-6 text-muted-foreground/50" />
                 </div>
                 <h3 className="text-base font-medium text-foreground">No matching shipments</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                  No records match "{shipmentsQuery}". Try a different search term.
+                <p className="text-sm text-muted-foreground mt-1">
+                  No records match "{shipmentsQuery}".
                 </p>
               </div>
             ) : (
@@ -487,45 +522,38 @@ export default function Dashboard() {
                     <TableHead className="font-semibold">Bayan No</TableHead>
                     <TableHead className="font-semibold">Client</TableHead>
                     <TableHead className="font-semibold">Type</TableHead>
-                    <TableHead className="font-semibold">Containers</TableHead>
-                    <TableHead className="font-semibold">Container Numbers</TableHead>
+                    <TableHead className="font-semibold">Container Number</TableHead>
                     <TableHead className="font-semibold">Terminal</TableHead>
                     <TableHead className="font-semibold">Pullout (Hijri)</TableHead>
                     <TableHead className="font-semibold text-right">Added</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredShipments.map((shipment) => {
-                    const containerNums = getContainerNumbers(shipment);
-                    const containersText = containerNums.length > 0 ? containerNums.join(", ") : "—";
-                    const hijri = getHijriDate(shipment);
-                    return (
-                      <TableRow key={shipment.id} className="group">
-                        <TableCell className="font-medium text-foreground">{shipment.bayanNo}</TableCell>
-                        <TableCell>{shipment.clientName}</TableCell>
-                        <TableCell>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
-                            {shipment.shipmentType}
-                          </span>
-                        </TableCell>
-                        <TableCell>{shipment.containersCount}</TableCell>
-                        <TableCell className="uppercase font-mono text-xs max-w-[260px]">
-                          <span className="block truncate" title={containersText}>
-                            {containersText}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-secondary/10 text-secondary-foreground border border-secondary/20">
-                            {shipment.terminal}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm whitespace-nowrap">{hijri || "—"}</TableCell>
-                        <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
-                          {formatDistanceToNow(new Date(shipment.addedAt), { addSuffix: true })}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {filteredShipments.map((shipment) => (
+                    <TableRow key={shipment.id} className="group">
+                      <TableCell className="font-medium text-foreground">{shipment.bayanNo}</TableCell>
+                      <TableCell>{shipment.clientName}</TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary">
+                          {shipment.shipmentType}
+                        </span>
+                      </TableCell>
+                      <TableCell className="uppercase font-mono text-xs">
+                        {shipment.containerNumber}
+                      </TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-secondary/10 text-secondary-foreground border border-secondary/20">
+                          {shipment.terminal}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {shipment.lastPulloutDateHijri || "—"}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
+                        {formatDistanceToNow(new Date(shipment.createdAt), { addSuffix: true })}
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             )}

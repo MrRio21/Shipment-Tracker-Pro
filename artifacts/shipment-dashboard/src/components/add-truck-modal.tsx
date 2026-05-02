@@ -3,7 +3,7 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Plus, Truck as TruckIcon } from "lucide-react";
+import { Loader2, Plus, Truck as TruckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -25,20 +25,30 @@ interface AddTruckModalProps {
 
 export function AddTruckModal({ open, onOpenChange, onSuccess }: AddTruckModalProps) {
   const { addTruck } = useTrucks();
+  const [saving, setSaving] = useState(false);
   const form = useForm<AddTruckFormValues>({
     resolver: zodResolver(addTruckSchema),
     defaultValues: { model: "", plateNumber: "" },
   });
 
-  function onSubmit(data: AddTruckFormValues) {
-    const id = addTruck(data);
-    toast.success("Truck added successfully", {
-      description: `${data.model} — ${data.plateNumber} has been registered`,
-      icon: <TruckIcon className="h-4 w-4" />,
-    });
-    form.reset();
-    onOpenChange(false);
-    onSuccess?.(id);
+  async function onSubmit(data: AddTruckFormValues) {
+    setSaving(true);
+    try {
+      const truck = await addTruck(data);
+      toast.success("Truck added successfully", {
+        description: `${truck.model} — ${truck.plateNumber} has been registered`,
+        icon: <TruckIcon className="h-4 w-4" />,
+      });
+      form.reset();
+      onOpenChange(false);
+      onSuccess?.(truck.id);
+    } catch (err) {
+      toast.error("Failed to add truck", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -46,15 +56,13 @@ export function AddTruckModal({ open, onOpenChange, onSuccess }: AddTruckModalPr
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Add New Truck</DialogTitle>
-          <DialogDescription>
-            Register a new truck for dispatch assignments.
-          </DialogDescription>
+          <DialogDescription>Register a new truck for dispatch assignments.</DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form
             onSubmit={(e) => {
               e.stopPropagation();
-              form.handleSubmit(onSubmit)(e);
+              void form.handleSubmit(onSubmit)(e);
             }}
             className="space-y-4 py-4"
           >
@@ -65,7 +73,7 @@ export function AddTruckModal({ open, onOpenChange, onSuccess }: AddTruckModalPr
                 <FormItem>
                   <FormLabel>Truck Model</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Volvo FH16" {...field} />
+                    <Input placeholder="e.g. Volvo FH16" {...field} disabled={saving} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -78,14 +86,16 @@ export function AddTruckModal({ open, onOpenChange, onSuccess }: AddTruckModalPr
                 <FormItem>
                   <FormLabel>Plate Number</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. 1234 ABC" {...field} />
+                    <Input placeholder="e.g. 1234 ABC" {...field} disabled={saving} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
             <div className="flex justify-end pt-2">
-              <Button type="submit" className="min-w-[100px]">Save Truck</Button>
+              <Button type="submit" className="min-w-[100px]" disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Truck"}
+              </Button>
             </div>
           </form>
         </Form>

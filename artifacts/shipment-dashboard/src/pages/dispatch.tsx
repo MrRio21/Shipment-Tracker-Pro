@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useShipments, getContainerNumbers } from "@/hooks/use-shipments";
+import { useShipments } from "@/hooks/use-shipments";
 import { useDrivers } from "@/hooks/use-drivers";
 import { useTrucks } from "@/hooks/use-trucks";
 import { useDispatches } from "@/hooks/use-dispatches";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Combobox } from "@/components/ui/combobox";
-import { CheckCircle2, FileSpreadsheet, Search, Truck, Users } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, Loader2, Search, Truck, Users } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -35,18 +35,19 @@ type DispatchFormValues = z.infer<typeof dispatchSchema>;
 
 export default function Dispatch() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { shipments } = useShipments();
-  const { drivers } = useDrivers();
+  const { drivers, addDriver } = useDrivers();
   const { trucks } = useTrucks();
-  const { dispatches, addDispatch, markReturned } = useDispatches();
+  const { dispatches, isLoading: dispatchesLoading, addDispatch, markReturned } = useDispatches();
   const [dispatchQuery, setDispatchQuery] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       setLocation("/");
     }
-  }, [isAuthenticated, setLocation]);
+  }, [isAuthenticated, authLoading, setLocation]);
 
   const today = format(new Date(), "yyyy-MM-dd");
 
@@ -65,9 +66,8 @@ export default function Dispatch() {
   const isDriverBusy = (driverId: string) =>
     dispatches.some((d) => d.driverId === driverId && d.returnedAt == null);
 
-  // Flatten all container numbers from all shipments (handles new array shape + legacy single string)
   const uniqueContainers = useMemo(
-    () => Array.from(new Set(shipments.flatMap((s) => getContainerNumbers(s)))).sort(),
+    () => Array.from(new Set(shipments.map((s) => s.containerNumber))).filter(Boolean).sort(),
     [shipments],
   );
 
@@ -95,15 +95,11 @@ export default function Dispatch() {
     const q = dispatchQuery.trim().toLowerCase();
     if (!q) return dispatches;
     return dispatches.filter((d) => {
-      const driver = drivers.find((dr) => dr.id === d.driverId);
-      const truck = trucks.find((t) => t.id === d.truckId);
-      const truckText = truck
-        ? `${truck.model} ${truck.plateNumber}`
-        : d.truckInfo ?? "";
+      const truckText = d.truck ? `${d.truck.model} ${d.truck.plateNumber}` : "";
       const haystack = [
         d.containerNumber,
-        driver?.name ?? "",
-        driver?.phone ?? "",
+        d.driver?.name ?? "",
+        d.driver?.phone ?? "",
         truckText,
         d.entryTime,
         d.cargoDeliveryDate ?? "",
@@ -114,68 +110,80 @@ export default function Dispatch() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [dispatches, drivers, trucks, dispatchQuery]);
+  }, [dispatches, dispatchQuery]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-muted/30 flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (!isAuthenticated) return null;
 
-  function onSubmit(data: DispatchFormValues) {
-    addDispatch(data);
-    const now = new Date();
-    form.reset({
-      containerNumber: "",
-      driverId: "",
-      truckId: "",
-      entryTime: format(now, "yyyy-MM-dd'T'HH:mm"),
-      cargoDeliveryDate: format(now, "yyyy-MM-dd"),
-      emptyReturnDate: format(now, "yyyy-MM-dd"),
-    });
-
-    const driverName = drivers.find((d) => d.id === data.driverId)?.name || "Unknown Driver";
-    toast.success("Dispatch logged successfully", {
-      description: `Container ${data.containerNumber} assigned to ${driverName}`,
-      icon: <Truck className="h-4 w-4" />,
-    });
+  async function onSubmit(data: DispatchFormValues) {
+    setSubmitting(true);
+    try {
+      await addDispatch(data);
+      const now = new Date();
+      form.reset({
+        containerNumber: "",
+        driverId: "",
+        truckId: "",
+        entryTime: format(now, "yyyy-MM-dd'T'HH:mm"),
+        cargoDeliveryDate: format(now, "yyyy-MM-dd"),
+        emptyReturnDate: format(now, "yyyy-MM-dd"),
+      });
+      const driverName = drivers.find((d) => d.id === data.driverId)?.name || "Driver";
+      toast.success("Dispatch logged successfully", {
+        description: `Container ${data.containerNumber} assigned to ${driverName}`,
+        icon: <Truck className="h-4 w-4" />,
+      });
+    } catch (err) {
+      toast.error("Failed to log dispatch", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function onMarkReturned(dispatchId: string, driverName: string, containerNumber: string) {
-    markReturned(dispatchId);
-    toast.success("Dispatch marked as returned", {
-      description: `${driverName} is now available · Container ${containerNumber}`,
-      icon: <CheckCircle2 className="h-4 w-4" />,
-    });
+  async function onMarkReturned(dispatchId: string, driverName: string, containerNumber: string) {
+    try {
+      await markReturned(dispatchId);
+      toast.success("Dispatch marked as returned", {
+        description: `${driverName} is now available · Container ${containerNumber}`,
+        icon: <CheckCircle2 className="h-4 w-4" />,
+      });
+    } catch (err) {
+      toast.error("Failed to mark as returned", {
+        description: err instanceof Error ? err.message : "An error occurred",
+      });
+    }
   }
 
   const exportToExcel = () => {
-    const rows = filteredDispatches.map((d) => {
-      const driver = drivers.find((drv) => drv.id === d.driverId);
-      const truck = trucks.find((t) => t.id === d.truckId);
-      const truckDisplay = truck
-        ? `${truck.model} — ${truck.plateNumber}`
-        : d.truckInfo || "Unknown";
-      return {
-        "Container Number": d.containerNumber,
-        "Driver Name": driver?.name || "Unknown",
-        "Phone": driver?.phone || "N/A",
-        "Truck": truckDisplay,
-        "Entry Time": format(new Date(d.entryTime), "yyyy-MM-dd HH:mm"),
-        "Cargo Delivery Date": d.cargoDeliveryDate ?? "",
-        "Empty Return Date": d.emptyReturnDate ?? "",
-        "Dispatch Status": d.returnedAt ? "Returned" : "Active",
-        "Returned At": d.returnedAt ? format(new Date(d.returnedAt), "yyyy-MM-dd HH:mm") : "",
-        "Driver Status": driver && isDriverBusy(driver.id) ? "Busy" : "Available",
-        "Added": format(new Date(d.addedAt), "yyyy-MM-dd HH:mm"),
-      };
-    });
+    const rows = filteredDispatches.map((d) => ({
+      "Container Number": d.containerNumber,
+      "Driver Name": d.driver?.name || "Unknown",
+      "Phone": d.driver?.phone || "N/A",
+      "Truck": d.truck ? `${d.truck.model} — ${d.truck.plateNumber}` : "Unknown",
+      "Entry Time": format(new Date(d.entryTime), "yyyy-MM-dd HH:mm"),
+      "Cargo Delivery Date": d.cargoDeliveryDate ?? "",
+      "Empty Return Date": d.emptyReturnDate ?? "",
+      "Status": d.returnedAt ? "Returned" : "Active",
+      "Returned At": d.returnedAt ? format(new Date(d.returnedAt), "yyyy-MM-dd HH:mm") : "",
+    }));
     if (rows.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Dispatches");
-    const filename = `dispatches-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
-    XLSX.writeFile(wb, filename);
+    XLSX.writeFile(wb, `dispatches-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
   };
 
-  const formatDateCell = (value: string | undefined | null) =>
+  const formatDateCell = (value: string | null | undefined) =>
     value ? format(new Date(value), "MMM d, yyyy") : "—";
 
   return (
@@ -183,7 +191,6 @@ export default function Dispatch() {
       <AppHeader />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
-
         {/* Drivers Section */}
         <Card className="shadow-sm border-border/60">
           <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
@@ -195,17 +202,17 @@ export default function Dispatch() {
                 </CardTitle>
                 <CardDescription>Manage your fleet of registered drivers</CardDescription>
               </div>
-              <AddDriverButton />
+              <AddDriverButton
+                onSuccess={() => {}}
+              />
             </div>
           </CardHeader>
           <CardContent className="pt-6">
             {drivers.length === 0 ? (
-              <div className="py-8 flex flex-col items-center justify-center text-center px-4 bg-background border border-border/50 rounded-lg border-dashed">
+              <div className="py-8 flex flex-col items-center justify-center text-center bg-background border border-border/50 rounded-lg border-dashed">
                 <Users className="h-8 w-8 text-muted-foreground/50 mb-3" />
-                <h3 className="text-sm font-medium text-foreground">No drivers registered</h3>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  Register drivers before logging dispatches.
-                </p>
+                <h3 className="text-sm font-medium">No drivers registered</h3>
+                <p className="text-xs text-muted-foreground mt-1">Register drivers before logging dispatches.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -237,7 +244,7 @@ export default function Dispatch() {
           </CardContent>
         </Card>
 
-        {/* Entry Form */}
+        {/* Dispatch Form */}
         <Card className="shadow-sm border-border/60">
           <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
             <CardTitle className="text-lg font-semibold flex items-center gap-2">
@@ -250,7 +257,6 @@ export default function Dispatch() {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-
                   <FormField
                     control={form.control}
                     name="containerNumber"
@@ -262,14 +268,10 @@ export default function Dispatch() {
                             options={containerOptions}
                             value={field.value}
                             onChange={field.onChange}
-                            placeholder={
-                              containerOptions.length === 0
-                                ? "No shipments exist"
-                                : "Search & select container"
-                            }
+                            placeholder={containerOptions.length === 0 ? "No shipments exist" : "Search & select container"}
                             searchPlaceholder="Type to search containers..."
                             emptyText="No matching container."
-                            disabled={containerOptions.length === 0}
+                            disabled={containerOptions.length === 0 || submitting}
                           />
                         </FormControl>
                         <FormMessage />
@@ -288,12 +290,10 @@ export default function Dispatch() {
                             options={driverOptions}
                             value={field.value}
                             onChange={field.onChange}
-                            placeholder={
-                              driverOptions.length === 0 ? "No drivers exist" : "Search & select driver"
-                            }
+                            placeholder={driverOptions.length === 0 ? "No drivers exist" : "Search & select driver"}
                             searchPlaceholder="Type to search drivers..."
                             emptyText="No matching driver."
-                            disabled={driverOptions.length === 0}
+                            disabled={driverOptions.length === 0 || submitting}
                           />
                         </FormControl>
                         <FormMessage />
@@ -314,14 +314,10 @@ export default function Dispatch() {
                                 options={truckOptions}
                                 value={field.value}
                                 onChange={field.onChange}
-                                placeholder={
-                                  truckOptions.length === 0
-                                    ? "No trucks — add one"
-                                    : "Search & select truck"
-                                }
+                                placeholder={truckOptions.length === 0 ? "No trucks — add one" : "Search & select truck"}
                                 searchPlaceholder="Type to search trucks..."
                                 emptyText="No matching truck."
-                                disabled={truckOptions.length === 0}
+                                disabled={truckOptions.length === 0 || submitting}
                               />
                             </FormControl>
                           </div>
@@ -342,7 +338,7 @@ export default function Dispatch() {
                       <FormItem>
                         <FormLabel>Driver Entry Time</FormLabel>
                         <FormControl>
-                          <Input type="datetime-local" {...field} />
+                          <Input type="datetime-local" {...field} disabled={submitting} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -356,7 +352,7 @@ export default function Dispatch() {
                       <FormItem>
                         <FormLabel>Cargo Delivery Date</FormLabel>
                         <FormControl>
-                          <Input type="date" {...field} />
+                          <Input type="date" {...field} disabled={submitting} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -370,22 +366,28 @@ export default function Dispatch() {
                       <FormItem>
                         <FormLabel>Empty Return Date</FormLabel>
                         <FormControl>
-                          <Input type="date" {...field} />
+                          <Input type="date" {...field} disabled={submitting} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-border/40">
                   <Button
                     type="submit"
                     className="min-w-[150px]"
-                    disabled={uniqueContainers.length === 0 || drivers.length === 0 || trucks.length === 0}
+                    disabled={submitting || uniqueContainers.length === 0 || drivers.length === 0 || trucks.length === 0}
                   >
-                    Log Dispatch
+                    {submitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Log Dispatch"
+                    )}
                   </Button>
                 </div>
               </form>
@@ -393,25 +395,31 @@ export default function Dispatch() {
           </CardContent>
         </Card>
 
-        {/* Data Table */}
+        {/* Dispatch Records Table */}
         <Card className="shadow-sm border-border/60 overflow-hidden">
           <div className="flex flex-col gap-4 p-6 border-b border-border/40 bg-muted/20">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <CardTitle className="text-lg font-semibold">Dispatch Records</CardTitle>
                 <CardDescription className="mt-1">
-                  Recent dispatch assignments
-                  {dispatchQuery && (
-                    <span className="ml-1 text-foreground">
-                      · showing {filteredDispatches.length} of {dispatches.length}
-                    </span>
+                  {dispatchesLoading ? (
+                    "Loading..."
+                  ) : (
+                    <>
+                      {dispatches.length} record{dispatches.length !== 1 ? "s" : ""} in the database
+                      {dispatchQuery && (
+                        <span className="ml-1 text-foreground">
+                          · showing {filteredDispatches.length}
+                        </span>
+                      )}
+                    </>
                   )}
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 onClick={exportToExcel}
-                disabled={filteredDispatches.length === 0}
+                disabled={filteredDispatches.length === 0 || dispatchesLoading}
                 className="gap-2 bg-background"
               >
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
@@ -431,14 +439,18 @@ export default function Dispatch() {
           </div>
 
           <div className="overflow-x-auto">
-            {dispatches.length === 0 ? (
+            {dispatchesLoading ? (
+              <div className="py-16 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : dispatches.length === 0 ? (
               <div className="py-24 flex flex-col items-center justify-center text-center px-4">
                 <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
                   <Truck className="h-8 w-8 text-muted-foreground/50" />
                 </div>
-                <h3 className="text-lg font-medium text-foreground">No dispatches logged</h3>
+                <h3 className="text-lg font-medium">No dispatches logged</h3>
                 <p className="text-muted-foreground mt-2 max-w-sm">
-                  Dispatches you log will appear here. Start by assigning a container to a driver.
+                  Start by assigning a container to a driver.
                 </p>
               </div>
             ) : filteredDispatches.length === 0 ? (
@@ -446,9 +458,9 @@ export default function Dispatch() {
                 <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-3">
                   <Search className="h-6 w-6 text-muted-foreground/50" />
                 </div>
-                <h3 className="text-base font-medium text-foreground">No matching dispatches</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                  No records match "{dispatchQuery}". Try a different search term.
+                <h3 className="text-base font-medium">No matching dispatches</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  No records match "{dispatchQuery}".
                 </p>
               </div>
             ) : (
@@ -469,20 +481,22 @@ export default function Dispatch() {
                 </TableHeader>
                 <TableBody>
                   {filteredDispatches.map((dispatch) => {
-                    const driver = drivers.find((d) => d.id === dispatch.driverId);
-                    const driverName = driver?.name || "Unknown";
-                    const truck = trucks.find((t) => t.id === dispatch.truckId);
-                    const truckDisplay = truck
-                      ? `${truck.model} — ${truck.plateNumber}`
-                      : dispatch.truckInfo || "—";
+                    const driverName = dispatch.driver?.name || "Unknown";
+                    const truckDisplay = dispatch.truck
+                      ? `${dispatch.truck.model} — ${dispatch.truck.plateNumber}`
+                      : "—";
                     const isReturned = dispatch.returnedAt != null;
                     return (
                       <TableRow key={dispatch.id} className="group">
-                        <TableCell className="uppercase font-mono text-xs">{dispatch.containerNumber}</TableCell>
-                        <TableCell className="font-medium text-foreground">{driverName}</TableCell>
-                        <TableCell>{driver?.phone || "N/A"}</TableCell>
+                        <TableCell className="uppercase font-mono text-xs">
+                          {dispatch.containerNumber}
+                        </TableCell>
+                        <TableCell className="font-medium">{driverName}</TableCell>
+                        <TableCell>{dispatch.driver?.phone || "N/A"}</TableCell>
                         <TableCell>{truckDisplay}</TableCell>
-                        <TableCell>{format(new Date(dispatch.entryTime), "MMM d, yyyy HH:mm")}</TableCell>
+                        <TableCell>
+                          {format(new Date(dispatch.entryTime), "MMM d, yyyy HH:mm")}
+                        </TableCell>
                         <TableCell>{formatDateCell(dispatch.cargoDeliveryDate)}</TableCell>
                         <TableCell>{formatDateCell(dispatch.emptyReturnDate)}</TableCell>
                         <TableCell>
@@ -509,7 +523,9 @@ export default function Dispatch() {
                               variant="outline"
                               size="sm"
                               className="gap-1.5 h-8 text-xs"
-                              onClick={() => onMarkReturned(dispatch.id, driverName, dispatch.containerNumber)}
+                              onClick={() =>
+                                onMarkReturned(dispatch.id, driverName, dispatch.containerNumber)
+                              }
                             >
                               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                               Mark Returned
@@ -517,7 +533,7 @@ export default function Dispatch() {
                           )}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground text-sm whitespace-nowrap">
-                          {formatDistanceToNow(new Date(dispatch.addedAt), { addSuffix: true })}
+                          {formatDistanceToNow(new Date(dispatch.createdAt), { addSuffix: true })}
                         </TableCell>
                       </TableRow>
                     );

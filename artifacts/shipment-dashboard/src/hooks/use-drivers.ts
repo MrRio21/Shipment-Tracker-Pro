@@ -1,29 +1,43 @@
-import { useLocalStorageState } from "./use-local-storage-state";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./use-api";
 
 export interface Driver {
   id: string;
   name: string;
   phone: string;
-  addedAt: string;
+  createdAt: string;
 }
 
-const STORAGE_KEY = "shipment-drivers";
-const EMPTY: Driver[] = [];
-
 export function useDrivers() {
-  const [drivers, setDrivers] = useLocalStorageState<Driver[]>(STORAGE_KEY, EMPTY);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addDriver = (data: { name: string; phone: string }) => {
-    setDrivers((prev) => [
-      {
-        id: crypto.randomUUID(),
-        name: data.name,
-        phone: data.phone,
-        addedAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await apiFetch<Driver[]>("/drivers");
+      setDrivers(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  return { drivers, addDriver };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addDriver = useCallback(
+    async (data: { name: string; phone: string }): Promise<Driver> => {
+      const driver = await apiFetch<Driver>("/drivers", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      setDrivers((prev) => [driver, ...prev]);
+      return driver;
+    },
+    [],
+  );
+
+  return { drivers, isLoading, addDriver, refresh };
 }

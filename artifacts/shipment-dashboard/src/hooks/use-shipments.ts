@@ -1,4 +1,5 @@
-import { useLocalStorageState } from "./use-local-storage-state";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./use-api";
 
 export type ShipmentType = "LCL" | "FCL" | "AIR";
 export type Terminal = "RSGT" | "DP" | "MAW" | "SAL" | "SATS";
@@ -6,43 +7,66 @@ export type Terminal = "RSGT" | "DP" | "MAW" | "SAL" | "SATS";
 export interface Shipment {
   id: string;
   bayanNo: string;
+  clientId: string | null;
   clientName: string;
-  shipmentType: ShipmentType;
+  shipmentType: string;
   containersCount: number;
-  containerNumbers: string[];
+  containerNumber: string;
+  terminal: string;
   lastPulloutDateHijri: string;
-  terminal: Terminal;
-  addedAt: string;
-  // Legacy fields kept for backward compatibility with previously stored records
-  containerNumber?: string;
-  lastPulloutDate?: string;
-  hijriDate?: string;
+  createdAt: string;
 }
 
-const STORAGE_KEY = "shipment-entries";
-const EMPTY: Shipment[] = [];
+export interface AddShipmentPayload {
+  bayanNo: string;
+  clientId?: string;
+  clientName: string;
+  shipmentType: string;
+  containersCount: number;
+  containerNumber: string;
+  terminal: string;
+  lastPulloutDateHijri: string;
+}
 
 export function useShipments() {
-  const [shipments, setShipments] = useLocalStorageState<Shipment[]>(STORAGE_KEY, EMPTY);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addShipment = (data: Omit<Shipment, "id" | "addedAt">) => {
-    setShipments((prev) => [
-      { ...data, id: crypto.randomUUID(), addedAt: new Date().toISOString() },
-      ...prev,
-    ]);
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await apiFetch<Shipment[]>("/shipments");
+      setShipments(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  return { shipments, addShipment };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addShipment = useCallback(
+    async (payload: AddShipmentPayload): Promise<Shipment> => {
+      const shipment = await apiFetch<Shipment>("/shipments", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setShipments((prev) => [shipment, ...prev]);
+      return shipment;
+    },
+    [],
+  );
+
+  return { shipments, isLoading, addShipment, refresh };
 }
 
+// Helpers kept for backward-compat with table render code
 export function getContainerNumbers(s: Shipment): string[] {
-  if (Array.isArray(s.containerNumbers) && s.containerNumbers.length > 0) {
-    return s.containerNumbers.filter(Boolean);
-  }
-  if (s.containerNumber) return [s.containerNumber];
-  return [];
+  return s.containerNumber ? [s.containerNumber] : [];
 }
 
 export function getHijriDate(s: Shipment): string {
-  return s.lastPulloutDateHijri || s.hijriDate || "";
+  return s.lastPulloutDateHijri || "";
 }

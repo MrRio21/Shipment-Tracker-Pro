@@ -1,44 +1,70 @@
-import { useLocalStorageState } from "./use-local-storage-state";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./use-api";
+import type { Driver } from "./use-drivers";
+import type { Truck } from "./use-trucks";
 
 export interface Dispatch {
   id: string;
   containerNumber: string;
+  driverId: string | null;
+  truckId: string | null;
+  entryTime: string;
+  cargoDeliveryDate: string | null;
+  emptyReturnDate: string | null;
+  returnedAt: string | null;
+  createdAt: string;
+  driver: Driver | null;
+  truck: Truck | null;
+}
+
+export interface AddDispatchPayload {
+  containerNumber: string;
   driverId: string;
   truckId: string;
   entryTime: string;
-  cargoDeliveryDate: string;
-  emptyReturnDate: string;
-  addedAt: string;
-  returnedAt: string | null;
-  // Legacy field kept for backward compatibility with previously stored records
-  truckInfo?: string;
+  cargoDeliveryDate?: string;
+  emptyReturnDate?: string;
 }
 
-const STORAGE_KEY = "shipment-dispatches";
-const EMPTY: Dispatch[] = [];
-
 export function useDispatches() {
-  const [dispatches, setDispatches] = useLocalStorageState<Dispatch[]>(STORAGE_KEY, EMPTY);
+  const [dispatches, setDispatches] = useState<Dispatch[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addDispatch = (data: Omit<Dispatch, "id" | "addedAt" | "returnedAt">) => {
-    setDispatches((prev) => [
-      {
-        ...data,
-        id: crypto.randomUUID(),
-        addedAt: new Date().toISOString(),
-        returnedAt: null,
-      },
-      ...prev,
-    ]);
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await apiFetch<Dispatch[]>("/dispatches");
+      setDispatches(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const markReturned = (id: string) => {
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addDispatch = useCallback(
+    async (payload: AddDispatchPayload): Promise<Dispatch> => {
+      const dispatch = await apiFetch<Dispatch>("/dispatches", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setDispatches((prev) => [dispatch, ...prev]);
+      return dispatch;
+    },
+    [],
+  );
+
+  const markReturned = useCallback(async (id: string) => {
+    const updated = await apiFetch<Dispatch>(`/dispatches/${id}/return`, {
+      method: "PATCH",
+    });
     setDispatches((prev) =>
-      prev.map((d) =>
-        d.id === id ? { ...d, returnedAt: new Date().toISOString() } : d,
-      ),
+      prev.map((d) => (d.id === id ? { ...d, ...updated } : d)),
     );
-  };
+  }, []);
 
-  return { dispatches, addDispatch, markReturned };
+  return { dispatches, isLoading, addDispatch, markReturned, refresh };
 }

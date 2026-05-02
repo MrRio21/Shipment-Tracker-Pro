@@ -1,35 +1,47 @@
-import { useLocalStorageState } from "./use-local-storage-state";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./use-api";
 
 export interface Truck {
   id: string;
   model: string;
   plateNumber: string;
-  addedAt: string;
+  createdAt: string;
 }
 
-const STORAGE_KEY = "shipment-trucks";
-const EMPTY: Truck[] = [];
-
 export function useTrucks() {
-  const [trucks, setTrucks] = useLocalStorageState<Truck[]>(STORAGE_KEY, EMPTY);
+  const [trucks, setTrucks] = useState<Truck[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addTruck = (data: { model: string; plateNumber: string }): string => {
-    const id = crypto.randomUUID();
-    setTrucks((prev) => [
-      {
-        id,
-        model: data.model,
-        plateNumber: data.plateNumber,
-        addedAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    return id;
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await apiFetch<Truck[]>("/trucks");
+      setTrucks(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const removeTruck = (id: string) => {
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addTruck = useCallback(
+    async (data: { model: string; plateNumber: string }): Promise<Truck> => {
+      const truck = await apiFetch<Truck>("/trucks", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      setTrucks((prev) => [truck, ...prev]);
+      return truck;
+    },
+    [],
+  );
+
+  const removeTruck = useCallback(async (id: string) => {
     setTrucks((prev) => prev.filter((t) => t.id !== id));
-  };
+  }, []);
 
-  return { trucks, addTruck, removeTruck };
+  return { trucks, isLoading, addTruck, removeTruck, refresh };
 }
