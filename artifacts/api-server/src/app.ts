@@ -5,6 +5,8 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
+import path from "path";
+
 declare module "express-session" {
   interface SessionData {
     userId: string;
@@ -65,5 +67,14 @@ app.use(
 );
 
 app.use("/api", router);
+// Serve static files from the React app
+app.use(express.static(path.join(process.cwd(), "../shipment-dashboard/dist")));
 
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get("*", (req, res) => {
+  res.sendFile(
+    path.join(process.cwd(), "../shipment-dashboard/dist/index.html"),
+  );
+});
 export default app;
