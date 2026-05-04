@@ -4,6 +4,7 @@ import session from "express-session";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import path from "path";
 
 declare module "express-session" {
   interface SessionData {
@@ -67,15 +68,24 @@ app.use(
 app.use("/api", router);
 
 // Serve static files from the React app (Hardcoded for Render Server)
-app.use(
-  express.static("/opt/render/project/src/artifacts/shipment-dashboard/dist"),
-);
+// app.use(
+//   express.static("/opt/render/project/src/artifacts/shipment-dashboard/dist"),
+// );
 
-// The "catchall" handler (Safest method for Express 5)
+// // The "catchall" handler (Safest method for Express 5)
+// app.use((req, res) => {
+//   res.sendFile(
+//     "/opt/render/project/src/artifacts/shipment-dashboard/dist/index.html",
+//   );
+// });
+
+// Serve static files from the React app dynamically
+const clientPath = path.join(process.cwd(), "../shipment-dashboard/dist");
+app.use(express.static(clientPath));
+
+// The "catchall" handler
 app.use((req, res) => {
-  res.sendFile(
-    "/opt/render/project/src/artifacts/shipment-dashboard/dist/index.html",
-  );
+  res.sendFile(path.join(clientPath, "index.html"));
 });
 
-export default app;     
+export default app;
