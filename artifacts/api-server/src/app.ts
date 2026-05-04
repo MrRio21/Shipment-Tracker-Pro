@@ -71,7 +71,7 @@ app.use(express.static("/opt/render/project/src/artifacts/shipment-dashboard/dis
 
 // The "catchall" handler: for any request that doesn't
 // match one above, send back React's index.html file.
-app.get("*", (req, res) => {
+app.use((req, res) => {
   res.sendFile("/opt/render/project/src/artifacts/shipment-dashboard/dist/index.html");
 });
 
