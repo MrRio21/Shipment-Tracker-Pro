@@ -67,11 +67,15 @@ app.use(
 app.use("/api", router);
 
 // Serve static files from the React app (Hardcoded for Render Server)
-app.use(express.static("/opt/render/project/src/artifacts/shipment-dashboard/dist"));
+app.use(
+  express.static("/opt/render/project/src/artifacts/shipment-dashboard/dist"),
+);
 
 // The "catchall" handler (Safest method for Express 5)
 app.use((req, res) => {
-  res.sendFile("/opt/render/project/src/artifacts/shipment-dashboard/dist/index.html");
+  res.sendFile(
+    "/opt/render/project/src/artifacts/shipment-dashboard/dist/index.html",
+  );
 });
 
-export default app;
+export default app;     
